@@ -157,43 +157,243 @@ fn snippet(body: &str) -> String {
 }
 
 /// The built-in starter documentation index.
+#[allow(clippy::too_many_lines)]
 pub fn starter_index() -> DocsIndex {
     DocsIndex::new(vec![
         Document {
             id: "command.pwd".to_owned(),
             title: "pwd — print the working directory".to_owned(),
-            body: "Use pwd to see the absolute path of the directory your shell is currently using.".to_owned(),
-            aliases: vec!["where am i".to_owned(), "current directory".to_owned()],
+            body: "Use pwd to see the full path of the folder your terminal is currently using. Example: pwd".to_owned(),
+            aliases: vec![
+                "where am i".to_owned(),
+                "current directory".to_owned(),
+                "current folder".to_owned(),
+                "show current location".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.cd".to_owned(),
+            title: "cd — change folders".to_owned(),
+            body: "Use cd to go into another folder. Example: cd ~/project. A path of ~ means your home folder.".to_owned(),
+            aliases: vec![
+                "change folder".to_owned(),
+                "change directory".to_owned(),
+                "go to a folder".to_owned(),
+                "move into a folder".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.ls".to_owned(),
+            title: "ls — list files and folders".to_owned(),
+            body: "Use ls to see the files and folders in the current location. Example: ls or ls ~/project.".to_owned(),
+            aliases: vec![
+                "list files".to_owned(),
+                "show files".to_owned(),
+                "see folder contents".to_owned(),
+                "what is in this folder".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.mkdir".to_owned(),
+            title: "mkdir — create a folder".to_owned(),
+            body: "Use mkdir to create a new folder. Example: mkdir ~/project creates a folder named project.".to_owned(),
+            aliases: vec![
+                "create a folder".to_owned(),
+                "make a folder".to_owned(),
+                "create a directory".to_owned(),
+                "make a directory".to_owned(),
+                "new folder".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.touch".to_owned(),
+            title: "touch — create an empty file".to_owned(),
+            body: "Use touch to create a new empty file. Example: touch ~/project/notes.txt creates notes.txt inside project.".to_owned(),
+            aliases: vec![
+                "create a file".to_owned(),
+                "create a text file".to_owned(),
+                "make a file".to_owned(),
+                "new file".to_owned(),
+                "empty file".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.cat".to_owned(),
+            title: "cat — show a file".to_owned(),
+            body: "Use cat to read a file and show its contents in the terminal. Example: cat ~/welcome.txt.".to_owned(),
+            aliases: vec![
+                "read a file".to_owned(),
+                "show file contents".to_owned(),
+                "print a file".to_owned(),
+                "open a text file".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.less".to_owned(),
+            title: "less — read a file page by page".to_owned(),
+            body: "Use less to read a long file one screen at a time. In this lesson shell, cat and less both display file contents.".to_owned(),
+            aliases: vec![
+                "read page by page".to_owned(),
+                "scroll through a file".to_owned(),
+                "read a long file".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.mv".to_owned(),
+            title: "mv — move or rename a file".to_owned(),
+            body: "Use mv to move a file into another folder or give it a new name. Example: mv note.txt archive/.".to_owned(),
+            aliases: vec![
+                "move a file".to_owned(),
+                "rename a file".to_owned(),
+                "put a file somewhere else".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.cp".to_owned(),
+            title: "cp — copy files".to_owned(),
+            body: "Use cp to make a copy of a file. Example: cp note.txt backup.txt. A filename pattern can copy several files.".to_owned(),
+            aliases: vec![
+                "copy a file".to_owned(),
+                "duplicate a file".to_owned(),
+                "copy folder".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.rm".to_owned(),
+            title: "rm — remove a file".to_owned(),
+            body: "Use rm to remove a file from the virtual lesson home. Example: rm old.txt. Check the name carefully before removing files.".to_owned(),
+            aliases: vec![
+                "delete a file".to_owned(),
+                "remove a file".to_owned(),
+                "get rid of a file".to_owned(),
+            ],
         },
         Document {
             id: "command.find".to_owned(),
             title: "find — search for files".to_owned(),
-            body: "Use find to walk a directory tree and select files by name, type, or other properties.".to_owned(),
-            aliases: vec!["find file by name".to_owned(), "locate a file".to_owned()],
+            body: "Use find to look through a folder and its subfolders for a file. Example: find ~/archive -name treasure.txt.".to_owned(),
+            aliases: vec![
+                "find file by name".to_owned(),
+                "locate a file".to_owned(),
+                "search for a file".to_owned(),
+                "look through folders".to_owned(),
+            ],
         },
         Document {
             id: "command.grep".to_owned(),
             title: "grep — search text".to_owned(),
-            body: "Use grep to print lines matching a pattern in input or files.".to_owned(),
-            aliases: vec!["search text in file".to_owned(), "filter lines".to_owned()],
+            body: "Use grep to find and show lines containing a word or phrase. Example: grep URGENT service.log.".to_owned(),
+            aliases: vec![
+                "search text in file".to_owned(),
+                "find text".to_owned(),
+                "find a line".to_owned(),
+                "filter lines".to_owned(),
+            ],
         },
         Document {
-            id: "command.chmod".to_owned(),
-            title: "chmod — change permissions".to_owned(),
-            body: "Use chmod to change read, write, and execute mode bits on a file.".to_owned(),
-            aliases: vec!["change permissions".to_owned(), "file mode".to_owned()],
+            id: "command.head".to_owned(),
+            title: "head — show the first lines".to_owned(),
+            body: "Use head to show the beginning of a file or the beginning of command output.".to_owned(),
+            aliases: vec![
+                "show first lines".to_owned(),
+                "first lines of a file".to_owned(),
+                "file beginning".to_owned(),
+            ],
         },
         Document {
-            id: "command.kill".to_owned(),
-            title: "kill — send a signal to a process".to_owned(),
-            body: "Use kill to send a selected signal to a process identified by PID.".to_owned(),
-            aliases: vec!["stop process".to_owned(), "terminate program".to_owned()],
+            id: "command.wc".to_owned(),
+            title: "wc — count input".to_owned(),
+            body: "Use wc to count the bytes received from a file or another command. It is useful for measuring output.".to_owned(),
+            aliases: vec![
+                "count file size".to_owned(),
+                "count bytes".to_owned(),
+                "count words".to_owned(),
+            ],
         },
         Document {
-            id: "command.cp".to_owned(),
-            title: "cp — copy files and directories".to_owned(),
-            body: "Use cp to copy a file or, with a recursive option, a directory tree.".to_owned(),
-            aliases: vec!["copy folder".to_owned(), "duplicate file".to_owned()],
+            id: "command.echo".to_owned(),
+            title: "echo — print words".to_owned(),
+            body: "Use echo to print words or a short message in the terminal. Example: echo hello.".to_owned(),
+            aliases: vec!["print words".to_owned(), "show a message".to_owned()],
+        },
+        Document {
+            id: "command.printf".to_owned(),
+            title: "printf — print exact text".to_owned(),
+            body: "Use printf when you want to print exact text. It is useful with > when saving text into a file.".to_owned(),
+            aliases: vec![
+                "print exact text".to_owned(),
+                "write exact text".to_owned(),
+                "output text".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.clear".to_owned(),
+            title: "clear — clear the terminal".to_owned(),
+            body: "Use clear to remove old output from the visible terminal. It does not delete files or reset the lesson.".to_owned(),
+            aliases: vec![
+                "clear terminal".to_owned(),
+                "clean screen".to_owned(),
+                "remove terminal output".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.exit".to_owned(),
+            title: "exit — leave the shell".to_owned(),
+            body: "Use exit to close the current lesson terminal. The command is always available.".to_owned(),
+            aliases: vec![
+                "leave terminal".to_owned(),
+                "close shell".to_owned(),
+                "quit terminal".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.help".to_owned(),
+            title: "help — list available commands".to_owned(),
+            body: "Use help for a short list of commands supported by the current lesson. The docs pane explains what each command does.".to_owned(),
+            aliases: vec![
+                "available commands".to_owned(),
+                "what commands can i use".to_owned(),
+                "command list".to_owned(),
+            ],
+        },
+        Document {
+            id: "shell.redirect".to_owned(),
+            title: "> — save command output to a file".to_owned(),
+            body: "Use > to send a command's output into a file instead of only showing it. Example: printf saved > result.txt.".to_owned(),
+            aliases: vec![
+                "save output".to_owned(),
+                "write command output".to_owned(),
+                "redirect output".to_owned(),
+                "put output in a file".to_owned(),
+            ],
+        },
+        Document {
+            id: "shell.pipe".to_owned(),
+            title: "| — pass output to another command".to_owned(),
+            body: "Use | to send the output of one command into the next command. Example: cat lines.txt | grep Linux.".to_owned(),
+            aliases: vec![
+                "connect commands".to_owned(),
+                "pass output".to_owned(),
+                "combine commands".to_owned(),
+                "pipe commands".to_owned(),
+            ],
+        },
+        Document {
+            id: "shell.glob".to_owned(),
+            title: "* — match many filenames".to_owned(),
+            body: "Use * as a filename wildcard. For example, *.log means every filename ending in .log.".to_owned(),
+            aliases: vec![
+                "all log files".to_owned(),
+                "filename wildcard".to_owned(),
+                "match many files".to_owned(),
+                "copy all files".to_owned(),
+            ],
+        },
+        Document {
+            id: "command.true".to_owned(),
+            title: "true — do nothing successfully".to_owned(),
+            body: "Use true when a command that succeeds without producing output is needed. It is mostly useful in shell experiments.".to_owned(),
+            aliases: vec!["do nothing".to_owned(), "successful no-op".to_owned()],
         },
     ])
 }
@@ -210,9 +410,22 @@ mod tests {
             "command.grep"
         );
         assert_eq!(index.search("where am i", 1)[0].document.id, "command.pwd");
+        assert_eq!(index.search("move a file", 1)[0].document.id, "command.mv");
         assert_eq!(
-            index.search("stop proces", 1)[0].document.id,
-            "command.kill"
+            index.search("create a file", 1)[0].document.id,
+            "command.touch"
+        );
+        assert_eq!(
+            index.search("create a folder", 1)[0].document.id,
+            "command.mkdir"
+        );
+        assert_eq!(
+            index.search("show file contents", 1)[0].document.id,
+            "command.cat"
+        );
+        assert_eq!(
+            index.search("save output", 1)[0].document.id,
+            "shell.redirect"
         );
     }
 }

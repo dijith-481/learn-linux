@@ -16,7 +16,7 @@ challenge "foundation.orientation" version=1 {
         }
     }
     objective {
-        text "Print the message stored in ~/welcome.txt."
+        text "Show the message inside the file ~/welcome.txt in the terminal."
     }
     setup {
         write "~/welcome.txt" {
@@ -60,7 +60,7 @@ challenge "fs.navigation.pwd" version=1 {
         }
     }
     objective {
-        text "Move into ~/practice and leave the shell there."
+        text "Go into the practice folder and leave your terminal there."
     }
     setup {
         mkdir "~/practice"
@@ -99,7 +99,7 @@ challenge "fs.files.make" version=1 {
         }
     }
     objective {
-        text "Create ~/project and an empty ~/project/notes.txt file."
+        text "Create a folder named project. Inside it, create an empty text file named notes.txt."
     }
     verify {
         all {
@@ -133,7 +133,7 @@ challenge "fs.files.read" version=1 {
         }
     }
     objective {
-        text "Print the briefing so that it appears in the terminal."
+        text "Open the file briefing.txt and show its message in the terminal."
     }
     setup {
         write "~/briefing.txt" {
@@ -168,7 +168,7 @@ challenge "fs.files.move" version=1 {
         }
     }
     objective {
-        text "Move ~/loose-note.txt into ~/archive/."
+        text "Move the file loose-note.txt into the archive folder."
     }
     setup {
         write "~/loose-note.txt" {
@@ -207,7 +207,7 @@ challenge "fs.search.find" version=1 {
         }
     }
     objective {
-        text "Locate treasure.txt under ~/archive and print its contents."
+        text "Find treasure.txt somewhere inside archive, then show what is inside it."
     }
     setup {
         mkdir "~/archive/2024/notes"
@@ -258,7 +258,7 @@ challenge "shell.redirect.output" version=1 {
         }
     }
     objective {
-        text "Create ~/result.txt containing exactly the word saved."
+        text "Create a file named result.txt and save the word saved inside it."
     }
     verify {
         file-equals "~/result.txt" "saved"
@@ -290,7 +290,7 @@ challenge "shell.pipes.basic" version=1 {
         }
     }
     objective {
-        text "Create ~/match.txt containing only the line that mentions Linux."
+        text "Find the line mentioning Linux in lines.txt and save that line in match.txt."
     }
     setup {
         write "~/lines.txt" {
@@ -325,7 +325,7 @@ challenge "fs.search.text" version=1 {
         }
     }
     objective {
-        text "Create ~/answer.txt with the line containing the word urgent."
+        text "Find the line containing URGENT in service.log and save it in answer.txt."
     }
     setup {
         write "~/service.log" {
@@ -361,7 +361,7 @@ challenge "fs.patterns.glob" version=1 {
         }
     }
     objective {
-        text "Copy every .log file from ~/reports into ~/backup/."
+        text "Copy all files ending in .log from reports into the backup folder."
     }
     setup {
         mkdir "~/reports"
