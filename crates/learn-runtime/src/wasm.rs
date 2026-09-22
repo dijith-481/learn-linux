@@ -333,13 +333,19 @@ impl SessionState {
                     })
                     .collect::<Vec<_>>();
                 output.push(pretty_columns(&values, 3).as_bytes());
-                self.redraw_input(output);
+                self.write_input(output);
             }
         }
     }
 
     fn redraw_input(&self, output: &OutputBuffer) {
-        output.push(b"\r");
+        // The prompt occupies two rows. Clear the input row, move to the
+        // prompt header, clear it too, then paint the pair exactly once.
+        output.push(b"\r\x1b[2K\x1b[1A\r\x1b[2K");
+        self.write_input(output);
+    }
+
+    fn write_input(&self, output: &OutputBuffer) {
         output.push(prompt(&self.shell.cwd).as_bytes());
         output.push(&self.input);
         output.push(b"\x1b[K");
@@ -1476,6 +1482,31 @@ mod tests {
         assert!(output.contains("embedded-posix"));
         assert!(output.contains("╭─ learner@learn  ~  ◈"));
         assert!(output.contains("╰─❯ "));
+    }
+
+    #[test]
+    fn prompt_editing_redraws_in_place_instead_of_appending_a_prompt() {
+        let mut session = session(&[]);
+        let mut reader = session.take_reader().expect("reader is available");
+        session.write(b"abc\x7f\x04").expect("editing is accepted");
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("session output is readable");
+        assert!(output.contains("\r\x1b[2K\x1b[1A\r\x1b[2K"));
+    }
+
+    #[test]
+    fn multi_match_completion_starts_a_fresh_prompt_line() {
+        let mut session = session(&[]);
+        let mut reader = session.take_reader().expect("reader is available");
+        session.write(b"c\t\x04").expect("completion is accepted");
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("session output is readable");
+        assert_eq!(output.matches("╭─ learner@learn").count(), 2);
+        assert!(output.contains("cat"));
     }
 
     #[test]
