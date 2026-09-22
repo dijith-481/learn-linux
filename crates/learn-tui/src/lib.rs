@@ -361,7 +361,9 @@ async fn app_loop(
     let mut mode = AppMode::Start;
     let mut start_transition = None;
     let mut focus = PanelFocus::Left;
-    let mut pet_enabled = true;
+    // The pet is an optional atmosphere feature; keep the default lesson
+    // focused and let learners enable it from the command palette.
+    let mut pet_enabled = false;
     let mut pet = PetState::default();
     let mut rain_enabled = false;
     let mut palette_index = 0_usize;
