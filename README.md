@@ -33,12 +33,11 @@ content compiled against its supported command and verifier contract.
 
 The full-screen client uses Ratatui + Crossterm, with `vt100` parsing the
 portable terminal stream. A small, state-driven success reveal uses the
-community `tachyonfx` animation library; `F5` toggles motion. Press
-`Ctrl-Space` for the centered searchable command palette, which can open docs,
-challenges, progress, Vim dojo, reset the current challenge, or quit. The
-active shell has a visible block cursor, arrow/Home/End editing, and Tab
-completion for commands and lesson files. The shell banner adapts between a
-large ASCII Learn Linux mark and a compact layout for narrow terminals. Pane
-borders, the level bar, quest card, completion reveal, and palette highlight
-use lightweight animated color accents; `F5` toggles motion. F2–F6 remain
-compatibility aliases.
+community `tachyonfx` animation library; calm motion can be toggled from the
+command palette. Press `Ctrl-Space` for the centered searchable command
+palette, which can open docs, challenges, progress, Vim dojo, reset the
+current challenge, toggle the pet/rain/motion, change themes, or quit. `Ctrl-H`
+focuses the terminal and `Ctrl-L` focuses the always-visible local docs pane.
+The active shell has a visible block cursor, arrow/Home/End editing, and Tab
+completion for commands and lesson files. There are no function-key controls;
+all actions are discoverable through the palette and the visible focus hints.

@@ -154,6 +154,7 @@ pub fn start_wasm_session(
         output: Arc::clone(&output),
         reader: Some(Box::new(OutputReader::new(output))),
     };
+    session.output.push(startup_fetch(challenge_id).as_bytes());
     session
         .output
         .push(prompt(&session.current_directory()).as_bytes());
@@ -360,7 +361,7 @@ fn prompt(cwd: &str) -> String {
             }
         },
     );
-    format!("\x1b]777;LEARN_PWD;{cwd}\x07learner@learn  {display} ❯ ")
+    format!("\r\x1b]777;LEARN_PWD;{cwd}\x07╭─ learner@learn  {display}  ◈\r\n╰─❯ ")
 }
 
 const SHELL_BANNER: &str = "\r\n  ╭──────────────────────────────────────────────────────╮\r\n  │   ██╗     ███████╗ █████╗ ██████╗ ███╗   ██╗        │\r\n  │   ██║     ██╔════╝██╔══██╗██╔══██╗████╗  ██║        │\r\n  │   ██║     █████╗  ███████║██████╔╝██╔██╗ ██║        │\r\n  │   ██║     ██╔══╝  ██╔══██║██╔══██╗██║╚██╗██║        │\r\n  │   ███████╗███████╗██║  ██║██║  ██║██║ ╚████║        │\r\n  │   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝        │\r\n  │                                                      │\r\n  │   ██╗     ██╗███╗   ██╗██╗   ██╗██╗  ██╗           │\r\n  │   ██║     ██║████╗  ██║██║   ██║╚██╗██╔╝           │\r\n  │   ██║     ██║██╔██╗ ██║██║   ██║ ╚███╔╝            │\r\n  │   ██║     ██║██║╚██╗██║██║   ██║ ██╔██╗            │\r\n  │   ███████╗██║██║ ╚████║╚██████╔╝██╔╝ ██╗           │\r\n  │   ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝           │\r\n  ╰──── shell dojo • type a command • make progress ───╯\r\n\r\n";
@@ -373,6 +374,12 @@ fn shell_banner(columns: u16) -> &'static str {
     } else {
         SHELL_BANNER
     }
+}
+
+fn startup_fetch(challenge_id: &str) -> String {
+    format!(
+        "\r\n🐧  LINUX SHELL DOJO  /  WASM LAB\r\n    Learn Linux · offline · verifier ready\r\n    runtime  embedded-posix    quest  {challenge_id}\r\n\r\n"
+    )
 }
 
 #[derive(Debug, Default)]
@@ -1454,6 +1461,21 @@ mod tests {
             .expect("session output is readable");
         assert!(output.contains("hi\n"));
         assert!(output.contains("learner@learn"));
+    }
+
+    #[test]
+    fn startup_fetch_and_starship_prompt_are_emitted_once() {
+        let mut session = session(&[]);
+        let mut reader = session.take_reader().expect("reader is available");
+        session.write(b"\x04").expect("session closes");
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("session output is readable");
+        assert_eq!(output.matches("LINUX SHELL DOJO").count(), 1);
+        assert!(output.contains("embedded-posix"));
+        assert!(output.contains("╭─ learner@learn  ~  ◈"));
+        assert!(output.contains("╰─❯ "));
     }
 
     #[test]

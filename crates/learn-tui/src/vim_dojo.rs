@@ -664,7 +664,7 @@ impl VimDojo {
 
     pub(crate) fn side_lines(&self, theme: Theme) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from(Span::styled(
-            "Vim dojo (F6 close)",
+            "Vim dojo (Esc close)",
             Style::default().fg(theme.warn),
         ))];
         match self.screen {
@@ -1002,7 +1002,7 @@ impl VimDojo {
             menu_item(self.menu_index == 5, "Word hop — learn w b e", theme),
             Line::from(""),
             Line::from("↑/↓ choose • 1–6 quick start • Enter play"),
-            Line::from("F6 returns to the Linux lesson."),
+            Line::from("Esc returns to the Linux lesson."),
         ]
     }
 

@@ -2000,7 +2000,7 @@ At very small terminals:
 ```text
 terminal
 + status line
-+ F-key/command to open objective/docs full-screen
++ command palette to open objective/docs/progress/Vim actions
 ```
 
 Never render an unusable three-column layout because the design was tuned for a screenshot.
@@ -2022,19 +2022,13 @@ Normal shell keybindings must continue to work.
 
 Do not steal common Bash/readline bindings such as `Ctrl-P`, `Ctrl-N`, `Ctrl-R`, `Ctrl-A`, `Ctrl-E`, or `Ctrl-W` as global app shortcuts.
 
-Recommended globally reserved keys:
-
-```text
-F1  help
-F2  docs
-F3  challenge/objective
-F4  progress/graph
-F5  motion on/off
-F6  optional Vim dojo
-F10 menu
-```
-
-The primary navigation is modal rather than a collection of hidden function-key commands. `Ctrl-Space` opens a searchable command menu; typing filters actions, arrow keys select, Enter executes, and Esc returns to the lesson. F2–F6 may remain compatibility aliases, but every modal must also be reachable and understandable from the visible menu.
+The primary navigation is modal rather than a collection of hidden
+function-key commands. Function keys are intentionally not part of the
+product workflow. `Ctrl-Space` opens a searchable command menu; typing filters
+actions, arrow keys select, Enter executes, and Esc returns to the lesson.
+`Ctrl-H` focuses the terminal, `Ctrl-L` focuses the docs search pane, and the
+palette exposes docs, challenges, progress, Vim dojo, motion, themes, reset,
+and quit.
 
 A command palette can be accessible through the menu or a carefully selected chord after testing terminal compatibility.
 
@@ -2044,7 +2038,8 @@ Vim controls are opt-in.
 
 The application can contain a Vim learning track and a UI navigation setting, but a beginner must not need `hjkl` to operate the basic app.
 
-The first implementation slice is the F6 Vim dojo. It is a self-contained practice surface rather than a hidden replacement for the Linux shell:
+The first implementation slice is the command-palette Vim dojo. It is a
+self-contained practice surface rather than a hidden replacement for the Linux shell:
 
 - Snake uses `h`, `j`, `k`, and `l` for movement.
 - Repeat & repair teaches `i`, `Esc`, `a`, `A`, `0`, `$`, `x`, and `dd` against a short target sentence.

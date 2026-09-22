@@ -54,6 +54,7 @@ enum PaletteCommand {
     ResetChallenge,
     TogglePet,
     ToggleRain,
+    ToggleAnimations,
     SetTheme(ThemeId),
     Quit,
 }
@@ -65,7 +66,7 @@ struct PaletteEntry {
     keywords: &'static str,
 }
 
-const PALETTE_ENTRIES: [PaletteEntry; 14] = [
+const PALETTE_ENTRIES: [PaletteEntry; 15] = [
     PaletteEntry {
         command: PaletteCommand::Docs,
         label: "Search local docs",
@@ -100,6 +101,11 @@ const PALETTE_ENTRIES: [PaletteEntry; 14] = [
         command: PaletteCommand::ToggleRain,
         label: "Toggle content-aware rain",
         keywords: "rain matrix ambient visual background",
+    },
+    PaletteEntry {
+        command: PaletteCommand::ToggleAnimations,
+        label: "Toggle calm animations",
+        keywords: "animation motion effects reduce motion",
     },
     PaletteEntry {
         command: PaletteCommand::SetTheme(ThemeId::Default),
@@ -195,8 +201,8 @@ struct PetState {
     mood: u8,
 }
 
-const PET_WIDTH: u16 = 14;
-const PET_HEIGHT: u16 = 6;
+const PET_WIDTH: u16 = 16;
+const PET_HEIGHT: u16 = 7;
 
 impl Default for PetState {
     fn default() -> Self {
@@ -214,7 +220,7 @@ impl Default for PetState {
 impl PetState {
     fn tick(&mut self, elapsed: Duration, width: u16, height: u16) {
         self.step_elapsed += elapsed;
-        if self.step_elapsed < Duration::from_millis(650) {
+        if self.step_elapsed < Duration::from_millis(850) {
             return;
         }
         self.step_elapsed = Duration::ZERO;
@@ -251,14 +257,6 @@ impl PetState {
         self.dx = dx;
         self.dy = dy;
         true
-    }
-}
-
-fn toggle_mode(current: AppMode, target: AppMode) -> AppMode {
-    if current == target {
-        AppMode::Lesson
-    } else {
-        target
     }
 }
 
@@ -382,7 +380,7 @@ async fn app_loop(
         }
         if let Some(progress) = start_transition.as_mut() {
             *progress += elapsed;
-            if *progress >= Duration::from_millis(650) {
+            if *progress >= Duration::from_millis(220) {
                 start_transition = None;
                 mode = AppMode::Lesson;
                 focus = PanelFocus::Left;
@@ -487,6 +485,10 @@ async fn app_loop(
                     if let Some(panel) = panel_focus_key(key.code, key.modifiers) {
                         focus = panel;
                         mode = AppMode::Lesson;
+                        if panel == PanelFocus::Right && docs_results.is_empty() {
+                            refresh_docs(daemon, client.as_mut(), &docs_query, &mut docs_results)
+                                .await?;
+                        }
                         continue;
                     }
                     if app_leader(key.code, key.modifiers) {
@@ -500,41 +502,6 @@ async fn app_loop(
                         }
                         continue;
                     }
-                    if key.code == KeyCode::F(5) {
-                        animations_enabled = !animations_enabled;
-                        continue;
-                    }
-                    if key.code == KeyCode::F(2) {
-                        focus = PanelFocus::Right;
-                        mode = toggle_mode(mode, AppMode::Docs);
-                        if mode == AppMode::Docs {
-                            refresh_docs(daemon, client.as_mut(), &docs_query, &mut docs_results)
-                                .await?;
-                        }
-                        continue;
-                    }
-                    if key.code == KeyCode::F(3) {
-                        focus = PanelFocus::Right;
-                        mode = toggle_mode(mode, AppMode::Challenges);
-                        continue;
-                    }
-                    if key.code == KeyCode::F(4) {
-                        focus = PanelFocus::Right;
-                        mode = toggle_mode(mode, AppMode::Progress);
-                        if mode == AppMode::Progress {
-                            progress_rows = progress_rows_for(daemon);
-                        }
-                        continue;
-                    }
-                    if key.code == KeyCode::F(6) {
-                        focus = PanelFocus::Left;
-                        mode = toggle_mode(mode, AppMode::Vim);
-                        if mode == AppMode::Vim {
-                            vim_dojo.reset();
-                        }
-                        continue;
-                    }
-
                     if mode == AppMode::Lesson && focus == PanelFocus::Left {
                         pet.handle_key(key.code);
                     }
@@ -546,7 +513,7 @@ async fn app_loop(
                                     start_transition = Some(Duration::ZERO);
                                 }
                             }
-                            KeyCode::Esc | KeyCode::F(10) => break,
+                            KeyCode::Esc => break,
                             _ => {}
                         }
                         continue;
@@ -640,6 +607,10 @@ async fn app_loop(
                                             rain_enabled = !rain_enabled;
                                             mode = AppMode::Lesson;
                                         }
+                                        PaletteCommand::ToggleAnimations => {
+                                            animations_enabled = !animations_enabled;
+                                            mode = AppMode::Lesson;
+                                        }
                                         PaletteCommand::SetTheme(selected_theme) => {
                                             theme_id = selected_theme;
                                             mode = AppMode::Lesson;
@@ -663,8 +634,42 @@ async fn app_loop(
                         continue;
                     }
                     if mode == AppMode::Lesson && focus == PanelFocus::Right {
-                        if key.code == KeyCode::Esc {
-                            focus = PanelFocus::Left;
+                        match key.code {
+                            KeyCode::Esc => focus = PanelFocus::Left,
+                            KeyCode::Backspace => {
+                                docs_query.pop();
+                                refresh_docs(
+                                    daemon,
+                                    client.as_mut(),
+                                    &docs_query,
+                                    &mut docs_results,
+                                )
+                                .await?;
+                            }
+                            KeyCode::Enter => {
+                                refresh_docs(
+                                    daemon,
+                                    client.as_mut(),
+                                    &docs_query,
+                                    &mut docs_results,
+                                )
+                                .await?;
+                            }
+                            KeyCode::Char(character)
+                                if !key
+                                    .modifiers
+                                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                            {
+                                docs_query.push(character);
+                                refresh_docs(
+                                    daemon,
+                                    client.as_mut(),
+                                    &docs_query,
+                                    &mut docs_results,
+                                )
+                                .await?;
+                            }
+                            _ => {}
                         }
                         continue;
                     }
@@ -753,7 +758,6 @@ async fn app_loop(
                         continue;
                     }
                     match key.code {
-                        KeyCode::F(10) => break,
                         _ if session.is_some() || rpc_session_id.is_some() => {
                             let submitted_command =
                                 track_shell_input(&mut shell_input, key.code, key.modifiers);
@@ -1043,7 +1047,7 @@ fn draw_ui(
     animation_time: Duration,
     elapsed: Duration,
     effects: &mut EffectManager<()>,
-    animations_enabled: bool,
+    _animations_enabled: bool,
     vim_dojo: &VimDojo,
     theme: Theme,
 ) -> Result<(), TuiError> {
@@ -1077,39 +1081,71 @@ fn draw_ui(
                     Constraint::Percentage(right_width),
                 ])
                 .split(area);
-            let title = selected_challenge.map_or("No challenges", |challenge| {
-                challenge.spec.meta.title.as_str()
-            });
-            let objective = selected_challenge.map_or(
-                "Add a valid KDL challenge to content/challenges.",
-                |challenge| challenge.spec.objective.text.as_str(),
-            );
+            let left_sections = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
+                .split(columns[0]);
+            let brief_lines = challenge_brief_lines(selected_challenge, theme);
             let runtime_text = daemon.runtime.render();
-            let terminal_lines = if mode == AppMode::Vim {
-                vim_dojo.main_lines(columns[0].width, theme)
+            let mut terminal_lines = if mode == AppMode::Vim {
+                vim_dojo.main_lines(left_sections[1].width.saturating_sub(2), theme)
             } else if session_active {
-                let width = columns[0].width;
+                let width = left_sections[1].width.saturating_sub(2);
                 terminal_lines_with_cursor(parser, width, mode == AppMode::Lesson, theme)
             } else {
                 runtime_text.lines().map(Line::from).collect::<Vec<_>>()
             };
-            let left_block = Block::default()
+            if mode == AppMode::Lesson && completed {
+                let next_title = daemon
+                    .content
+                    .challenges
+                    .get(selected_index.saturating_add(1))
+                    .map(|challenge| challenge.spec.meta.title.as_str());
+                terminal_lines.extend(completion_lines(
+                    selected_challenge,
+                    next_title,
+                    completion_elapsed,
+                    score,
+                    theme,
+                ));
+            }
+            let brief_block = Block::default()
                 .borders(Borders::ALL)
                 .border_style(if focus == PanelFocus::Left {
                     theme.accent()
                 } else {
                     theme.muted()
                 })
+                .title(" QUEST BRIEF ")
+                .padding(Padding::uniform(1));
+            let brief = Paragraph::new(brief_lines)
+                .block(brief_block)
+                .wrap(Wrap { trim: true });
+            frame.render_widget(brief, left_sections[0]);
+            let terminal_block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(if focus == PanelFocus::Left {
+                    theme.accent()
+                } else {
+                    theme.muted()
+                })
+                .title(" TERMINAL ")
                 .padding(Padding::top(1));
             let left = Paragraph::new(terminal_lines)
-                .block(left_block)
+                .block(terminal_block)
                 .wrap(Wrap { trim: false });
-            frame.render_widget(left, columns[0]);
+            frame.render_widget(left, left_sections[1]);
             if rain_enabled && mode == AppMode::Lesson {
-                render_content_rain(frame, columns[0], selected_challenge, animation_time, theme);
+                render_content_rain(
+                    frame,
+                    left_sections[1],
+                    selected_challenge,
+                    animation_time,
+                    theme,
+                );
             }
             if pet_enabled && mode == AppMode::Lesson {
-                render_terminal_pet(frame, columns[0], animation_time, pet, theme);
+                render_terminal_pet(frame, left_sections[1], animation_time, pet, theme);
             }
             if mode == AppMode::Lesson && hint_level > 0 {
                 let hint = selected_challenge.and_then(|challenge| {
@@ -1123,7 +1159,7 @@ fn draw_ui(
                         )
                         .map(|hint| hint.text.as_str())
                 });
-                render_inline_hint(frame, columns[0], hint, theme);
+                render_inline_hint(frame, left_sections[1], hint, theme);
             }
             let right_lines = match mode {
                 AppMode::Palette => palette_lines(palette_query, palette_index, theme),
@@ -1153,39 +1189,7 @@ fn draw_ui(
                     lines
                 }
                 AppMode::Start => Vec::new(),
-                AppMode::Lesson => {
-                    let motion = if animations_enabled { "on" } else { "off" };
-                    let level = selected_index.saturating_add(1);
-                    let total = daemon.content.challenges.len().max(1);
-                    let mut lines = vec![
-                        progress_line(level, total, 16, theme),
-                        Line::from(Span::styled(
-                            title,
-                            theme.accent().add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from(""),
-                        Line::from(Span::styled(
-                            "CURRENT QUEST",
-                            Style::default().fg(theme.dim).add_modifier(Modifier::BOLD),
-                        )),
-                        Line::from(objective),
-                        Line::from(""),
-                    ];
-                    if completed {
-                        lines.extend(completion_lines(
-                            selected_challenge,
-                            completion_elapsed,
-                            score,
-                            theme,
-                        ));
-                    } else {
-                        lines.push(Line::from(
-                            "Ctrl-Space command center • F2 docs • F3 quests • F4 progress",
-                        ));
-                        lines.push(Line::from(format!("F5 motion {motion} • F6 Vim dojo")));
-                    }
-                    lines
-                }
+                AppMode::Lesson => docs_sidebar_lines(docs_query, docs_results, theme),
             };
             let right_block = Block::default()
                 .borders(Borders::ALL)
@@ -1221,31 +1225,156 @@ fn terminal_lines_with_cursor(
         .enumerate()
         .map(|(row, contents)| {
             if !show_cursor || row != usize::from(cursor_row) {
-                let style = if contents.contains('█') {
-                    theme.accent()
-                } else {
-                    Style::default()
-                };
-                return Line::from(Span::styled(contents, style));
+                return terminal_line_spans(&contents, theme);
             }
             let characters = contents.chars().collect::<Vec<_>>();
             let cursor = usize::from(cursor_column).min(characters.len());
             let before = characters[..cursor].iter().collect::<String>();
             let highlighted = characters.get(cursor).copied().unwrap_or(' ');
             let after = characters.get(cursor.saturating_add(1)..).unwrap_or(&[]);
-            Line::from(vec![
-                Span::raw(before),
-                Span::styled(
-                    highlighted.to_string(),
-                    Style::default()
-                        .fg(theme.selected_fg)
-                        .bg(theme.selected_bg)
-                        .bold(),
-                ),
-                Span::raw(after.iter().collect::<String>()),
-            ])
+            let mut spans = terminal_line_spans(&before, theme).spans;
+            spans.push(Span::styled(
+                highlighted.to_string(),
+                Style::default()
+                    .fg(theme.selected_fg)
+                    .bg(theme.selected_bg)
+                    .bold(),
+            ));
+            spans.extend(terminal_line_spans(&after.iter().collect::<String>(), theme).spans);
+            Line::from(spans)
         })
         .collect()
+}
+
+fn terminal_line_spans(contents: &str, theme: Theme) -> Line<'static> {
+    if let Some(line) = startup_fetch_line(contents, theme) {
+        return line;
+    }
+    if let Some(line) = starship_prompt_line(contents, theme) {
+        return line;
+    }
+    let Some(identity_start) = contents.find("learner@learn") else {
+        return Line::from(Span::styled(contents.to_owned(), theme.fg));
+    };
+    let identity_end = identity_start + "learner@learn".len();
+    let Some(operator_offset) = contents[identity_end..].find(" ❯ ") else {
+        return Line::from(Span::styled(contents.to_owned(), theme.fg));
+    };
+    let operator_start = identity_end + operator_offset;
+    let path_start = contents[identity_end..operator_start]
+        .find(|character: char| !character.is_ascii_whitespace())
+        .map_or(operator_start, |offset| identity_end + offset);
+    let path_end = identity_end + contents[identity_end..operator_start].trim_end().len();
+    let command_start = operator_start + " ❯ ".len();
+    let mut spans = Vec::new();
+    if identity_start > 0 {
+        spans.push(Span::styled(
+            contents[..identity_start].to_owned(),
+            theme.fg,
+        ));
+    }
+    spans.push(Span::styled(
+        contents[identity_start..identity_end].to_owned(),
+        theme.accent().add_modifier(Modifier::BOLD),
+    ));
+    if path_start > identity_end {
+        spans.push(Span::styled(
+            contents[identity_end..path_start].to_owned(),
+            theme.muted(),
+        ));
+    }
+    if path_end > path_start {
+        spans.push(Span::styled(
+            contents[path_start..path_end].to_owned(),
+            Style::default().fg(theme.warn),
+        ));
+    }
+    spans.push(Span::styled(
+        contents[path_end..command_start].to_owned(),
+        Style::default()
+            .fg(theme.success)
+            .add_modifier(Modifier::BOLD),
+    ));
+    if command_start < contents.len() {
+        spans.push(Span::styled(contents[command_start..].to_owned(), theme.fg));
+    }
+    Line::from(spans)
+}
+
+fn startup_fetch_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
+    if let Some(rest) = contents.strip_prefix("🐧  ") {
+        let separator = rest.find("  /  ")?;
+        return Some(Line::from(vec![
+            Span::styled("🐧  ", Style::default().fg(theme.warn)),
+            Span::styled(
+                rest[..separator].to_owned(),
+                theme.accent().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("  /  ", theme.muted()),
+            Span::styled(rest[separator + 5..].to_owned(), theme.dim()),
+        ]));
+    }
+    if contents.trim_start().starts_with("Learn Linux") {
+        return Some(Line::from(Span::styled(contents.to_owned(), theme.dim())));
+    }
+    if let Some(rest) = contents.strip_prefix("    runtime  ") {
+        let Some((runtime, quest)) = rest.split_once("    quest  ") else {
+            return Some(Line::from(Span::styled(contents.to_owned(), theme.dim())));
+        };
+        return Some(Line::from(vec![
+            Span::styled("    runtime  ", theme.accent()),
+            Span::styled(runtime.to_owned(), theme.fg),
+            Span::styled("    quest  ", Style::default().fg(theme.warn)),
+            Span::styled(quest.to_owned(), theme.fg),
+        ]));
+    }
+    None
+}
+
+fn starship_prompt_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
+    if contents.starts_with("╭─ ") {
+        let identity_start = contents.find("learner@learn")?;
+        let identity_end = identity_start + "learner@learn".len();
+        let icon_start = contents[identity_end..].find("  ◈")? + identity_end;
+        let path_start = contents[identity_end..icon_start]
+            .find(|character: char| !character.is_ascii_whitespace())
+            .map_or(icon_start, |offset| identity_end + offset);
+        let path_end = identity_end + contents[identity_end..icon_start].trim_end().len();
+        return Some(Line::from(vec![
+            Span::styled(contents[..identity_start].to_owned(), theme.muted()),
+            Span::styled(
+                contents[identity_start..identity_end].to_owned(),
+                theme.accent().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(contents[identity_end..path_start].to_owned(), theme.muted()),
+            Span::styled(
+                contents[path_start..path_end].to_owned(),
+                Style::default().fg(theme.warn),
+            ),
+            Span::styled(contents[path_end..icon_start + 2].to_owned(), theme.muted()),
+            Span::styled(
+                contents[icon_start + 2..].to_owned(),
+                Style::default()
+                    .fg(theme.success)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    }
+    if let Some(operator_start) = contents.find("❯")
+        && contents.starts_with("╰─")
+    {
+        return Some(Line::from(vec![
+            Span::styled(contents[..operator_start].to_owned(), theme.muted()),
+            Span::styled(
+                "❯",
+                Style::default()
+                    .fg(theme.success)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(contents[operator_start + "❯".len()..].to_owned(), theme.fg),
+        ]));
+    }
+    None
 }
 
 fn render_start_screen(
@@ -1262,29 +1391,32 @@ fn render_start_screen(
     );
     render_game_of_life(frame, area, time, theme);
 
-    let content = centered_rect(58, 42, area);
-    let progress = start_transition_percent(transition);
-    let action = if transition.is_some() {
-        format!("OPENING QUEST  {progress:02}%")
-    } else {
-        "[ ENTER ]  START LEARNING".to_owned()
-    };
+    let content = centered_rect(72, 74, area);
     let action_style = if transition.is_some() {
-        Style::default().fg(theme.selected_fg).bg(theme.warn).bold()
+        theme.selected().add_modifier(Modifier::BOLD)
     } else {
         theme.selected()
     };
-    let lines = vec![
-        Line::from(Span::styled("LEARN LINUX", theme.title())),
-        Line::from(Span::styled("shell dojo", theme.dim())),
+    let mut lines = if area.width >= 44 && area.height >= 16 {
+        let mut lines = start_word_lines("LEARN", theme.accent().add_modifier(Modifier::BOLD));
+        lines.extend(start_word_lines(
+            "LINUX",
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ));
+        lines
+    } else {
+        vec![Line::from(Span::styled("LEARN LINUX", theme.title()))]
+    };
+    lines.extend([
+        Line::from(Span::styled("keyboard-first shell dojo", theme.dim())),
         Line::from(""),
-        Line::from(Span::styled(action, action_style)),
+        Line::from(Span::styled("[ ENTER ]  START LEARNING", action_style)),
         Line::from(""),
         Line::from(Span::styled(
-            "F6 Vim dojo  ·  Ctrl-Space commands  ·  Esc quit",
-            theme.muted(),
+            "Vim dojo in command center  ·  Ctrl-Space commands  ·  Esc quit",
+            theme.dim(),
         )),
-    ];
+    ]);
     frame.render_widget(
         Paragraph::new(lines)
             .alignment(Alignment::Center)
@@ -1347,9 +1479,9 @@ fn render_game_of_life(frame: &mut ratatui::Frame<'_>, area: Rect, time: Duratio
             if let Some(cell) = buffer.cell_mut((screen_x, screen_y)) {
                 cell.set_symbol(if (x + y) % 5 == 0 { "•" } else { "·" })
                     .set_style(Style::default().fg(if (x + y) % 5 == 0 {
-                        theme.accent
-                    } else {
                         theme.muted
+                    } else {
+                        theme.backdrop
                     }));
             }
         }
@@ -1463,7 +1595,7 @@ fn render_legacy_start_screen(
             if transition.is_some() {
                 format!("  syncing the sandbox  {progress}%")
             } else {
-                "  Enter begin  •  Ctrl-Space command center  •  F6 Vim dojo".to_owned()
+                "  Enter begin  •  Ctrl-Space command center  •  Esc quit".to_owned()
             },
             Style::default().fg(Color::DarkGray),
         )),
@@ -1571,7 +1703,7 @@ fn render_legacy_start_screen(
     let shortcuts = Paragraph::new(Line::from(vec![
         Span::styled(" Ctrl-Space ", keycap_style()),
         Span::styled(" command palette    ", Style::default().fg(Color::Gray)),
-        Span::styled(" F5 ", keycap_style()),
+        Span::styled(" calm ", keycap_style()),
         Span::styled(" motion", Style::default().fg(Color::Gray)),
     ]))
     .block(Block::default().padding(Padding::top(1)));
@@ -1648,7 +1780,7 @@ fn render_compact_start_screen(
             .padding(Padding::uniform(1)),
     );
     frame.render_widget(body, rows[1]);
-    let footer = Paragraph::new("Ctrl-Space palette  •  F6 Vim dojo  •  Esc quit")
+    let footer = Paragraph::new("Ctrl-Space palette  •  Vim dojo in palette  •  Esc quit")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, rows[2]);
@@ -1793,8 +1925,73 @@ fn challenge_lines(
     lines
 }
 
+fn challenge_brief_lines(
+    challenge: Option<&learn_challenge::CompiledChallenge>,
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    let Some(challenge) = challenge else {
+        return vec![Line::from(Span::styled("No active quest", theme.dim()))];
+    };
+    vec![
+        Line::from(Span::styled(
+            challenge.spec.meta.title.clone(),
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            challenge.spec.objective.text.clone(),
+            theme.fg,
+        )),
+        Line::from(Span::styled(
+            format!("skill  {}", challenge.spec.id),
+            theme.muted(),
+        )),
+    ]
+}
+
+fn docs_sidebar_lines(
+    query: &str,
+    results: &[(String, String)],
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from(Span::styled(
+            "LOCAL DOCS",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled("Search the command reference", theme.dim())),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("/ {query}▌"),
+            Style::default().fg(theme.warn),
+        )),
+        Line::from(""),
+    ];
+    if results.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "Ctrl-L focuses this search field.",
+            theme.muted(),
+        )));
+        lines.push(Line::from(Span::styled(
+            "Try: pwd, ls, cat, grep, pipes",
+            theme.dim(),
+        )));
+    } else {
+        for (title, snippet) in results {
+            lines.push(Line::from(Span::styled(title.clone(), theme.accent())));
+            lines.push(Line::from(Span::styled(snippet.clone(), theme.dim())));
+            lines.push(Line::from(""));
+        }
+    }
+    lines.push(Line::from(Span::styled(
+        "Ctrl-H terminal  •  Ctrl-L docs  •  Esc back",
+        theme.muted(),
+    )));
+    lines
+}
+
 fn completion_lines(
     challenge: Option<&learn_challenge::CompiledChallenge>,
+    next_title: Option<&str>,
     elapsed: Duration,
     score: usize,
     theme: Theme,
@@ -1803,6 +2000,10 @@ fn completion_lines(
     let spinner =
         ["■", "□", "▪", "▫"][usize::try_from((elapsed.as_millis() / 120) % 4).unwrap_or(0)];
     let title = challenge.map_or("Quest complete", |item| item.spec.meta.title.as_str());
+    let next_line = next_title.map_or_else(
+        || "NEXT QUEST  /  skill path complete".to_owned(),
+        |title| format!("NEXT QUEST  /  {title}"),
+    );
     vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -1826,10 +2027,7 @@ fn completion_lines(
             theme.accent(),
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "NEXT QUEST  /  loading the next node in your skill graph…",
-            theme.dim(),
-        )),
+        Line::from(Span::styled(next_line, theme.dim())),
     ]
 }
 
@@ -1915,35 +2113,34 @@ fn render_terminal_pet(
         height,
     );
     let blink = (time.as_millis() / 900) % 7 == 0;
-    let eyes = if blink { "──" } else { "●●" };
+    let eyes = if blink { "—  —" } else { "●  ●" };
     let tail = if pet.mood % 2 == 0 { "╱" } else { "╲" };
     let orange = Style::default().fg(theme.pet_primary);
     let orange_light = Style::default().fg(theme.pet_secondary);
     let shadow = Style::default().fg(theme.muted);
     let eyes_style = Style::default().fg(Color::Rgb(48, 39, 35));
     let lines = vec![
+        Line::from(Span::styled("  ▗▄██▄▖ ▗▄██▄▖ ", orange_light)),
+        Line::from(Span::styled(" ▟██████████▙  ", orange)),
         Line::from(vec![
-            Span::raw("  "),
-            Span::styled("▄██▄  ▄██▄", orange_light),
-            Span::raw("  "),
-        ]),
-        Line::from(vec![Span::styled(" ▟██████████▙", orange), Span::raw(" ")]),
-        Line::from(vec![
-            Span::styled("▐██ ", orange),
+            Span::styled("▐██  ", orange),
             Span::styled(eyes, eyes_style),
-            Span::styled(" ██▌", orange),
+            Span::styled("  ██▌ ", orange),
         ]),
         Line::from(vec![
-            Span::styled("▐██ ", orange),
+            Span::styled("▐██   ", orange),
             Span::styled("▾", orange_light),
-            Span::styled("  ", orange),
-            Span::styled("██▌", orange),
+            Span::styled("   ██▌ ", orange),
         ]),
+        Line::from(vec![Span::styled(" ▜██  ᴗ  ██▛ ", orange)]),
         Line::from(vec![
-            Span::styled(" ▜████████▛ ", orange),
+            Span::styled("  ▀███████▀  ", orange),
             Span::styled(tail, orange_light),
         ]),
-        Line::from(Span::styled("   ▀██▀   ", shadow)),
+        Line::from(vec![
+            Span::styled("   ▀▀    ▀▀   ", shadow),
+            Span::styled(tail, orange_light),
+        ]),
     ];
     frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), pet_area);
 }
@@ -2034,18 +2231,6 @@ fn truncate_text(value: &str, width: usize) -> String {
     }
 }
 
-fn progress_line(current: usize, total: usize, width: usize, theme: Theme) -> Line<'static> {
-    let filled = width.saturating_mul(current.min(total)) / total.max(1);
-    Line::from(vec![
-        Span::styled(
-            format!("✦ LEVEL {current:02}/{total:02}  "),
-            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("━".repeat(filled), Style::default().fg(theme.success)),
-        Span::styled("·".repeat(width.saturating_sub(filled)), theme.muted()),
-    ])
-}
-
 fn palette_lines(query: &str, selected: usize, theme: Theme) -> Vec<Line<'static>> {
     let matches = palette_matches(query);
     let mut lines = vec![Line::from(Span::styled(
@@ -2107,8 +2292,8 @@ fn bounded_dimension(value: u16, minimum: u16, maximum: u16) -> u16 {
 
 fn pane_size(columns: u16, rows: u16) -> (u16, u16) {
     (
-        (columns.saturating_mul(72) / 100).max(1),
-        rows.saturating_sub(1).max(1),
+        (columns.saturating_mul(72) / 100).saturating_sub(2).max(1),
+        (rows.saturating_mul(80) / 100).saturating_sub(3).max(1),
     )
 }
 
@@ -2156,8 +2341,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pane_size_matches_borderless_terminal_content() {
-        assert_eq!(pane_size(100, 40), (72, 39));
+    fn pane_size_matches_split_terminal_content() {
+        assert_eq!(pane_size(100, 40), (70, 29));
         assert_eq!(pane_size(1, 1), (1, 1));
     }
 
@@ -2219,8 +2404,6 @@ mod tests {
         assert_eq!(palette_matches("rain"), vec![6]);
         assert!(app_leader(KeyCode::Char(' '), KeyModifiers::CONTROL));
         assert!(!app_leader(KeyCode::Char(' '), KeyModifiers::NONE));
-        assert_eq!(toggle_mode(AppMode::Lesson, AppMode::Docs), AppMode::Docs);
-        assert_eq!(toggle_mode(AppMode::Docs, AppMode::Docs), AppMode::Lesson);
     }
 
     #[test]
