@@ -384,7 +384,7 @@ fn shell_banner(columns: u16) -> &'static str {
 
 fn startup_fetch(challenge_id: &str) -> String {
     format!(
-        "\r\n🐧  LINUX SHELL DOJO  /  WASM LAB\r\n    Learn Linux · offline · verifier ready\r\n    runtime  embedded-posix    quest  {challenge_id}\r\n\r\n"
+        "\r\n       ▄████▄          │  🐧  LINUX SHELL DOJO\r\n     ▄████████▄        │  runtime  embedded-posix\r\n    ███  ◉  ◉ ███      │  quest    {challenge_id}\r\n    ███   ▾   ███      │  status   offline • verifier ready\r\n     ▀████████▀        │  shell    virtual-posix\r\n       ▀▀  ▀▀          │  docs     Ctrl-L search\r\n\r\n"
     )
 }
 

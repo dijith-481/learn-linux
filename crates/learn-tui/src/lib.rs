@@ -1304,16 +1304,29 @@ fn terminal_line_spans(contents: &str, theme: Theme) -> Line<'static> {
 }
 
 fn startup_fetch_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
-    if let Some(rest) = contents.strip_prefix("🐧  ") {
-        let separator = rest.find("  /  ")?;
+    if let Some((logo, info)) = contents.split_once("│")
+        && logo.chars().any(|character| "▄█▀".contains(character))
+    {
+        let info = info.trim_start();
+        if info.starts_with("🐧  ") {
+            return Some(Line::from(vec![
+                Span::styled(logo.to_owned(), theme.accent().add_modifier(Modifier::BOLD)),
+                Span::styled("│ ", theme.muted()),
+                Span::styled(
+                    info.to_owned(),
+                    Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+        }
+        let label_end = info.find("  ").unwrap_or(info.len());
         return Some(Line::from(vec![
-            Span::styled("🐧  ", Style::default().fg(theme.warn)),
+            Span::styled(logo.to_owned(), theme.accent().add_modifier(Modifier::BOLD)),
+            Span::styled("│ ", theme.muted()),
             Span::styled(
-                rest[..separator].to_owned(),
-                theme.accent().add_modifier(Modifier::BOLD),
+                info[..label_end].to_owned(),
+                Style::default().fg(theme.warn),
             ),
-            Span::styled("  /  ", theme.muted()),
-            Span::styled(rest[separator + 5..].to_owned(), theme.dim()),
+            Span::styled(info[label_end..].to_owned(), theme.fg),
         ]));
     }
     if contents.trim_start().starts_with("Learn Linux") {
