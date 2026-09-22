@@ -27,8 +27,6 @@ impl ThemeId {
                 surface: Color::Rgb(14, 20, 29),
                 overlay: Color::Rgb(28, 40, 56),
                 backdrop: Color::Rgb(42, 67, 78),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
             Self::Catppuccin => Theme {
                 fg: Color::Rgb(220, 226, 250),
@@ -43,8 +41,6 @@ impl ThemeId {
                 surface: Color::Rgb(49, 50, 68),
                 overlay: Color::Rgb(69, 71, 90),
                 backdrop: Color::Rgb(86, 79, 112),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
             Self::Nord => Theme {
                 fg: Color::Rgb(226, 232, 242),
@@ -59,8 +55,6 @@ impl ThemeId {
                 surface: Color::Rgb(59, 66, 82),
                 overlay: Color::Rgb(67, 76, 94),
                 backdrop: Color::Rgb(82, 103, 123),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
             Self::TokyoNight => Theme {
                 fg: Color::Rgb(215, 222, 255),
@@ -75,8 +69,6 @@ impl ThemeId {
                 surface: Color::Rgb(36, 40, 59),
                 overlay: Color::Rgb(47, 53, 73),
                 backdrop: Color::Rgb(66, 76, 112),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
             Self::Everforest => Theme {
                 fg: Color::Rgb(225, 214, 187),
@@ -91,8 +83,6 @@ impl ThemeId {
                 surface: Color::Rgb(61, 72, 77),
                 overlay: Color::Rgb(77, 89, 96),
                 backdrop: Color::Rgb(91, 112, 91),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
             Self::EverforestLight => Theme {
                 fg: Color::Rgb(92, 106, 114),
@@ -107,8 +97,6 @@ impl ThemeId {
                 surface: Color::Rgb(242, 239, 223),
                 overlay: Color::Rgb(230, 226, 207),
                 backdrop: Color::Rgb(199, 211, 174),
-                pet_primary: Color::Rgb(235, 146, 72),
-                pet_secondary: Color::Rgb(255, 195, 106),
             },
         }
     }
@@ -129,8 +117,6 @@ pub(crate) struct Theme {
     pub(crate) surface: Color,
     pub(crate) overlay: Color,
     pub(crate) backdrop: Color,
-    pub(crate) pet_primary: Color,
-    pub(crate) pet_secondary: Color,
 }
 
 impl Theme {

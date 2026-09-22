@@ -1,6 +1,6 @@
 //! Small, opt-in Vim practice games.
 
-use std::time::Duration;
+use std::{cmp::Ordering, time::Duration};
 
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -14,9 +14,22 @@ const SNAKE_WIDTH: i16 = 24;
 const SNAKE_HEIGHT: i16 = 10;
 const SNAKE_STEP: Duration = Duration::from_millis(220);
 const SNAKE_TARGETS: usize = 12;
-const REPEAT_TARGET: &str = "I can learn Linux one command at a time.";
+const HUNT_WIDTH: i16 = 34;
+const HUNT_HEIGHT: i16 = 10;
+const HUNT_TARGETS: usize = 8;
+const TEXT_OBJECT_BUFFER: &str = "const path = \"tmp/cache\";";
+const SEARCH_BUFFER: [&str; 7] = [
+    "  1  deploy.sh",
+    "  2  notes.md",
+    "  3  TODO: fix the path",
+    "  4  release.txt",
+    "  5  archive.md",
+    "  6  TODO: ship it",
+    "  7  deploy.log",
+];
 const SUBSTITUTE_COMMAND: &str = "%s/hate/love/g";
 const WORD_HOP_TARGET: usize = 5;
+const VIM_LEVEL_COUNT: usize = 6;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
@@ -27,12 +40,6 @@ enum Screen {
     Search,
     Substitute,
     WordHop,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditMode {
-    Normal,
-    Insert,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,21 +220,23 @@ fn target_symbol(score: usize) -> &'static str {
 
 #[derive(Debug)]
 struct RepeatGame {
-    buffer: String,
-    cursor: usize,
-    mode: EditMode,
-    pending_delete: bool,
+    player: Point,
+    target: Point,
+    score: usize,
+    misses: usize,
+    complete: bool,
     message: String,
 }
 
 impl Default for RepeatGame {
     fn default() -> Self {
         Self {
-            buffer: String::new(),
-            cursor: 0,
-            mode: EditMode::Normal,
-            pending_delete: false,
-            message: "Press i, type the line, then Esc. Make one typo and repair it with x."
+            player: Point { x: 3, y: 5 },
+            target: Point { x: 27, y: 2 },
+            score: 0,
+            misses: 0,
+            complete: false,
+            message: "Move onto the glowing character with h j k l, then press x to delete it."
                 .to_owned(),
         }
     }
@@ -238,100 +247,65 @@ impl RepeatGame {
         *self = Self::default();
     }
 
-    fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
-        match self.mode {
-            EditMode::Insert => self.handle_insert_key(code, modifiers),
-            EditMode::Normal => self.handle_normal_key(code),
+    fn handle_key(&mut self, code: KeyCode) {
+        if self.complete {
+            return;
         }
-    }
-
-    fn handle_insert_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
         match code {
-            KeyCode::Esc => {
-                self.mode = EditMode::Normal;
-                self.pending_delete = false;
+            KeyCode::Char('h') | KeyCode::Left => self.player.x = (self.player.x - 1).max(0),
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.player.y = (self.player.y + 1).min(HUNT_HEIGHT - 1);
             }
-            KeyCode::Backspace => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                    self.buffer.remove(self.cursor);
+            KeyCode::Char('k') | KeyCode::Up => self.player.y = (self.player.y - 1).max(0),
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.player.x = (self.player.x + 1).min(HUNT_WIDTH - 1);
+            }
+            KeyCode::Char('x') => {
+                if self.player == self.target {
+                    self.score += 1;
+                    if self.score >= HUNT_TARGETS {
+                        self.complete = true;
+                        self.message = String::from(
+                            "Arena clear. x deleted every target; Vim remains delightfully terse.",
+                        );
+                    } else {
+                        self.target = hunt_target(self.score, self.player);
+                        self.message = format!(
+                            "Deleted. {} targets remain; keep moving, tiny text surgeon.",
+                            HUNT_TARGETS - self.score
+                        );
+                    }
+                } else {
+                    self.misses += 1;
+                    self.message =
+                        String::from("x deletes under the cursor. Get the glowing target first.");
                 }
-            }
-            KeyCode::Char(character)
-                if !modifiers.contains(KeyModifiers::CONTROL)
-                    && !modifiers.contains(KeyModifiers::ALT) =>
-            {
-                self.buffer.insert(self.cursor, character);
-                self.cursor += character.len_utf8();
             }
             _ => {}
         }
     }
 
-    fn handle_normal_key(&mut self, code: KeyCode) {
-        match code {
-            KeyCode::Esc => {
-                self.pending_delete = false;
-            }
-            KeyCode::Char('i') => {
-                self.mode = EditMode::Insert;
-                self.pending_delete = false;
-            }
-            KeyCode::Char('a') => {
-                self.cursor = next_boundary(&self.buffer, self.cursor);
-                self.mode = EditMode::Insert;
-                self.pending_delete = false;
-            }
-            KeyCode::Char('A') => {
-                self.cursor = self.buffer.len();
-                self.mode = EditMode::Insert;
-                self.pending_delete = false;
-            }
-            KeyCode::Char('0') => self.cursor = 0,
-            KeyCode::Char('$') => self.cursor = self.buffer.len(),
-            KeyCode::Char('h') | KeyCode::Left => {
-                self.cursor = previous_boundary(&self.buffer, self.cursor);
-                self.pending_delete = false;
-            }
-            KeyCode::Char('l') | KeyCode::Right => {
-                self.cursor = next_boundary(&self.buffer, self.cursor);
-                self.pending_delete = false;
-            }
-            KeyCode::Char('x') => {
-                if self.cursor < self.buffer.len() {
-                    let end = next_boundary(&self.buffer, self.cursor);
-                    self.buffer.replace_range(self.cursor..end, "");
-                }
-                self.pending_delete = false;
-            }
-            KeyCode::Char('d') if self.pending_delete => {
-                self.buffer.clear();
-                self.cursor = 0;
-                self.pending_delete = false;
-                self.message = String::from("dd deleted the line. Efficient, slightly alarming.");
-            }
-            KeyCode::Char('d') => self.pending_delete = true,
-            _ => self.pending_delete = false,
-        }
-    }
-
     fn is_complete(&self) -> bool {
-        self.buffer == REPEAT_TARGET
+        self.complete
     }
 }
 
-fn previous_boundary(text: &str, cursor: usize) -> usize {
-    text[..cursor]
-        .char_indices()
-        .next_back()
-        .map_or(0, |(index, _)| index)
-}
-
-fn next_boundary(text: &str, cursor: usize) -> usize {
-    text[cursor..]
-        .chars()
-        .next()
-        .map_or(text.len(), |character| cursor + character.len_utf8())
+fn hunt_target(score: usize, player: Point) -> Point {
+    let points = [
+        Point { x: 27, y: 2 },
+        Point { x: 8, y: 1 },
+        Point { x: 21, y: 7 },
+        Point { x: 31, y: 4 },
+        Point { x: 13, y: 8 },
+        Point { x: 3, y: 2 },
+        Point { x: 25, y: 8 },
+        Point { x: 16, y: 1 },
+    ];
+    let mut target = points[score % points.len()];
+    if target == player {
+        target.x = (target.x + 5).rem_euclid(HUNT_WIDTH);
+    }
+    target
 }
 
 #[derive(Debug)]
@@ -463,6 +437,8 @@ impl WordHopGame {
 
 #[derive(Debug)]
 struct TextObjectGame {
+    player: Point,
+    target: Point,
     stage: usize,
     complete: bool,
     message: String,
@@ -471,9 +447,12 @@ struct TextObjectGame {
 impl Default for TextObjectGame {
     fn default() -> Self {
         Self {
+            player: Point { x: 0, y: 3 },
+            target: Point { x: 14, y: 3 },
             stage: 0,
             complete: false,
-            message: "Change the quoted text with c i \" — operator plus text object.".to_owned(),
+            message: "Navigate onto the quoted word, then use c i \" to change its inside."
+                .to_owned(),
         }
     }
 }
@@ -488,21 +467,31 @@ impl TextObjectGame {
             return;
         }
         let expected = ['c', 'i', '"'];
-        if let KeyCode::Char(character) = code {
-            if character == expected[self.stage] {
+        match code {
+            KeyCode::Char('h') | KeyCode::Left => self.player.x = (self.player.x - 1).max(0),
+            KeyCode::Char('j') | KeyCode::Down => self.player.y = (self.player.y + 1).min(6),
+            KeyCode::Char('k') | KeyCode::Up => self.player.y = (self.player.y - 1).max(0),
+            KeyCode::Char('l') | KeyCode::Right => self.player.x = (self.player.x + 1).min(27),
+            KeyCode::Char(character) if character == expected[self.stage] => {
+                if self.player != self.target {
+                    self.message =
+                        String::from("That command needs the cursor on the quoted word.");
+                    return;
+                }
                 self.stage += 1;
                 if self.stage == expected.len() {
                     self.complete = true;
-                    self.message = String::from(
-                        "ci\" selected the inner text. The buffer has been changed cleanly.",
-                    );
+                    self.message =
+                        String::from("ci\" captured the inner text. Precision editing unlocked.");
                 } else {
-                    self.message = format!("Good. Next key: {}", expected[self.stage]);
+                    self.message = format!("Target locked. Next key: {}", expected[self.stage]);
                 }
-            } else if character != 'r' {
-                self.stage = 0;
-                self.message = String::from("Sequence reset. Try c then i then a quote.");
             }
+            KeyCode::Char(_) => {
+                self.stage = 0;
+                self.message = String::from("Missed. Move to the glowing word and try c i \".");
+            }
+            _ => {}
         }
     }
 }
@@ -511,6 +500,8 @@ impl TextObjectGame {
 struct SearchGame {
     query: String,
     command_mode: bool,
+    match_found: bool,
+    cursor: Point,
     complete: bool,
     message: String,
 }
@@ -520,8 +511,11 @@ impl Default for SearchGame {
         Self {
             query: String::new(),
             command_mode: false,
+            match_found: false,
+            cursor: Point { x: 0, y: 3 },
             complete: false,
-            message: "Press /, search for TODO, then Enter. n repeats the search.".to_owned(),
+            message: "Use /TODO to reveal the first target, then n to jump to the next one."
+                .to_owned(),
         }
     }
 }
@@ -534,13 +528,18 @@ impl SearchGame {
     fn handle_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
         if !self.command_mode {
             match code {
+                KeyCode::Char('h') | KeyCode::Left => self.cursor.x = (self.cursor.x - 1).max(0),
+                KeyCode::Char('j') | KeyCode::Down => self.cursor.y = (self.cursor.y + 1).min(6),
+                KeyCode::Char('k') | KeyCode::Up => self.cursor.y = (self.cursor.y - 1).max(0),
+                KeyCode::Char('l') | KeyCode::Right => self.cursor.x = (self.cursor.x + 1).min(30),
                 KeyCode::Char('/') => {
                     self.command_mode = true;
                     self.query.clear();
                     self.message = String::from("Search mode. Type TODO, then press Enter.");
                 }
-                KeyCode::Char('n') if self.query.eq_ignore_ascii_case("TODO") => {
+                KeyCode::Char('n') if self.match_found => {
                     self.complete = true;
+                    self.cursor = Point { x: 5, y: 5 };
                     self.message = String::from("n found the next match. Search muscle acquired.");
                 }
                 _ => {}
@@ -558,8 +557,10 @@ impl SearchGame {
             KeyCode::Enter => {
                 self.command_mode = false;
                 if self.query.eq_ignore_ascii_case("TODO") {
-                    self.complete = true;
-                    self.message = String::from("Match found. /pattern is now a navigation tool.");
+                    self.match_found = true;
+                    self.cursor = Point { x: 5, y: 2 };
+                    self.message =
+                        String::from("First match found. Press n to jump to the next TODO.");
                 } else {
                     self.message = format!("No match for '{}'. Try TODO.", self.query);
                 }
@@ -664,82 +665,19 @@ impl VimDojo {
 
     pub(crate) fn side_lines(&self, theme: Theme) -> Vec<Line<'static>> {
         let mut lines = vec![Line::from(Span::styled(
-            "Vim dojo (Esc close)",
-            Style::default().fg(theme.warn),
+            "VIM DOJO  /  ESC CLOSE",
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
         ))];
         match self.screen {
             Screen::Menu => {
-                lines.extend([
-                    Line::from("Optional. No Vim knowledge required."),
-                    Line::from("Choose a tiny game; learn by doing."),
-                    Line::from(""),
-                    Line::from("1 Snake — h j k l"),
-                    Line::from("2 Repeat & repair — i Esc x"),
-                    Line::from("3 Text object — ci\""),
-                    Line::from("4 Search — /pattern n"),
-                    Line::from("5 Ex substitute — %s/.../.../g"),
-                    Line::from("6 Word hop — w b e"),
-                    Line::from(""),
-                    Line::from("↑/↓ choose • 1–6 quick start • Enter start"),
-                ]);
+                lines.extend(menu_side_lines(theme));
             }
-            Screen::Snake => lines.extend([
-                Line::from("Snake"),
-                Line::from("Move with h j k l."),
-                Line::from(format!("Eat all {SNAKE_TARGETS} Vim key targets.")),
-                Line::from("r reset • Esc menu"),
-                Line::from(""),
-                Line::from(self.snake.message.clone()),
-            ]),
-            Screen::Repeat => lines.extend([
-                Line::from("Repeat & repair"),
-                Line::from("Normal: i/a/A, h/l, 0/$, x, dd"),
-                Line::from("Insert: type • Esc normal"),
-                Line::from("Esc again returns to menu"),
-                Line::from(""),
-                Line::from(self.repeat.message.clone()),
-                Line::from(if self.repeat.is_complete() {
-                    "Solved. Your fingers have met the buffer."
-                } else {
-                    "The buffer is judging every keystroke."
-                }),
-            ]),
-            Screen::TextObject => lines.extend([
-                Line::from("Text object trainer"),
-                Line::from("Use c i \" to change inside quotes."),
-                Line::from("Operator + motion = precise editing."),
-                Line::from("Esc menu • r reset"),
-                Line::from(""),
-                Line::from(self.text_object.message.clone()),
-            ]),
-            Screen::Search => lines.extend([
-                Line::from("Search & jump"),
-                Line::from("/ starts a search; Enter accepts it; n repeats."),
-                Line::from("Esc menu • r reset"),
-                Line::from(""),
-                Line::from(self.search.message.clone()),
-            ]),
-            Screen::Substitute => lines.extend([
-                Line::from("Ex substitute"),
-                Line::from("Press : then type the command."),
-                Line::from("Use g so both matches change."),
-                Line::from("Esc menu • r is not a command here"),
-                Line::from(""),
-                Line::from(self.substitute.message.clone()),
-                Line::from(if self.substitute.complete {
-                    "Solved. That was suspiciously efficient."
-                } else {
-                    "No shell, no plugin, just a useful edit."
-                }),
-            ]),
-            Screen::WordHop => lines.extend([
-                Line::from("Word hop"),
-                Line::from("Normal mode: w / b / e move by words."),
-                Line::from("Reach chmod, then the dojo returns to its menu."),
-                Line::from("Esc menu • r reset"),
-                Line::from(""),
-                Line::from(self.word_hop.message.clone()),
-            ]),
+            Screen::Snake => lines.extend(snake_side_lines(&self.snake, theme)),
+            Screen::Repeat => lines.extend(repeat_side_lines(&self.repeat, theme)),
+            Screen::TextObject => lines.extend(text_object_side_lines(&self.text_object, theme)),
+            Screen::Search => lines.extend(search_side_lines(&self.search, theme)),
+            Screen::Substitute => lines.extend(substitute_side_lines(&self.substitute, theme)),
+            Screen::WordHop => lines.extend(word_hop_side_lines(&self.word_hop, theme)),
         }
         lines
     }
@@ -860,15 +798,16 @@ impl VimDojo {
     }
 
     fn handle_repeat_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
-        if code == KeyCode::Char('r') && self.repeat.mode == EditMode::Normal {
+        let _ = modifiers;
+        if code == KeyCode::Char('r') {
             self.repeat.reset();
             return;
         }
-        if code == KeyCode::Esc && self.repeat.mode == EditMode::Normal {
+        if code == KeyCode::Esc {
             self.screen = Screen::Menu;
             return;
         }
-        self.repeat.handle_key(code, modifiers);
+        self.repeat.handle_key(code);
     }
 
     fn handle_substitute_key(&mut self, code: KeyCode, modifiers: KeyModifiers) {
@@ -981,25 +920,29 @@ impl VimDojo {
             ),
             menu_item(
                 self.menu_index == 1,
-                "Repeat & repair — edit without flailing",
+                "Whack-a-mole — move and delete targets",
                 theme,
             ),
             menu_item(
                 self.menu_index == 2,
-                "Text objects — make ci\" precise",
+                "Quote rescue — navigate and use ci\"",
                 theme,
             ),
             menu_item(
                 self.menu_index == 3,
-                "Search — find TODO with / and n",
+                "Search hunt — find TODO, then jump",
                 theme,
             ),
             menu_item(
                 self.menu_index == 4,
-                "Ex substitute — make %s useful",
+                "Word sweep — turn every hate into love",
                 theme,
             ),
-            menu_item(self.menu_index == 5, "Word hop — learn w b e", theme),
+            menu_item(
+                self.menu_index == 5,
+                "Word hop — chain w b e motions",
+                theme,
+            ),
             Line::from(""),
             Line::from("↑/↓ choose • 1–6 quick start • Enter play"),
             Line::from("Esc returns to the Linux lesson."),
@@ -1038,120 +981,579 @@ impl VimDojo {
         lines
     }
 
-    fn repeat_lines(&self, _width: u16, theme: Theme) -> Vec<Line<'static>> {
-        vec![
+    fn repeat_lines(&self, width: u16, theme: Theme) -> Vec<Line<'static>> {
+        let mut lines = game_header(
+            "02",
+            "WHACK-A-MOLE",
+            "move the cursor, delete the glowing character",
+            width,
+            theme,
+        );
+        lines.extend([Line::from(Span::styled(
+            "LIVE ARENA  /  x deletes under the cursor",
+            theme.accent().add_modifier(Modifier::BOLD),
+        ))]);
+        for y in 0..HUNT_HEIGHT {
+            lines.push(hunt_board_line(&self.repeat, y, theme));
+        }
+        lines.extend([
+            Line::from(""),
+            progress_line("DELETE", self.repeat.score, HUNT_TARGETS, theme),
             Line::from(Span::styled(
-                format!("REPEAT & REPAIR — {:?} mode", self.repeat.mode),
-                Style::default().fg(theme.success),
+                format!("{}  /  misses {}", self.repeat.message, self.repeat.misses),
+                status_style(self.repeat.is_complete(), theme),
             )),
-            Line::from("Target:"),
-            Line::from(REPEAT_TARGET),
-            Line::from("Buffer:"),
-            cursor_line(
-                &self.repeat.buffer,
-                self.repeat.cursor,
-                self.repeat.mode,
+            Line::from(""),
+            key_row(&["h j k l", "move", "x", "delete", "r reset"], theme),
+        ]);
+        lines
+    }
+
+    fn substitute_lines(&self, width: u16, theme: Theme) -> Vec<Line<'static>> {
+        let command = if self.substitute.command_mode {
+            format!(":{}▌", self.substitute.command)
+        } else {
+            ":%s/hate/love/g".to_owned()
+        };
+        let mut lines = game_header(
+            "05",
+            "WORD SWEEP",
+            "clear every hostile word with one Ex command",
+            width,
+            theme,
+        );
+        lines.extend([
+            Line::from(Span::styled(
+                "LIVE BUFFER  /  two targets detected",
+                theme.accent().add_modifier(Modifier::BOLD),
+            )),
+            substitute_word_field(self.substitute.complete, theme),
+            Line::from(""),
+            Line::from(Span::styled(
+                "COMMAND LINE",
+                theme.accent().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                command,
+                cursor_style_for_command(self.substitute.command_mode, theme),
+            )),
+            Line::from(""),
+            if self.substitute.complete {
+                Line::from(Span::styled(
+                    "✓ 2 MATCHES REPLACED  /  GLOBAL FLAG WORKED",
+                    status_style(true, theme),
+                ))
+            } else {
+                Line::from(Span::styled(
+                    "Press : then run the command shown above.",
+                    theme.dim(),
+                ))
+            },
+            Line::from(""),
+            key_row(
+                &[": command mode", "Enter run", "Esc cancel", "r reset"],
                 theme,
             ),
-            Line::from(""),
-            Line::from(self.repeat.message.clone()),
-        ]
+        ]);
+        if self.substitute.complete {
+            lines.insert(
+                7,
+                replacement_line(
+                    "The old script says love; the new script says love.",
+                    "love",
+                    theme.success,
+                ),
+            );
+        }
+        lines
     }
 
-    fn substitute_lines(&self, _width: u16, theme: Theme) -> Vec<Line<'static>> {
-        let command = if self.substitute.command_mode {
-            format!(":{}", self.substitute.command)
-        } else {
-            "Press : to edit with Ex.".to_owned()
-        };
-        vec![
+    fn text_object_lines(&self, width: u16, theme: Theme) -> Vec<Line<'static>> {
+        let mut lines = game_header(
+            "03",
+            "QUOTE RESCUE",
+            "navigate to the quoted word, then use a real text object",
+            width,
+            theme,
+        );
+        lines.push(Line::from(Span::styled(
+            "LIVE BUFFER  /  ◆ cursor   ✦ target",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )));
+        for y in 0..7 {
+            lines.push(text_object_board_line(&self.text_object, y, theme));
+        }
+        lines.extend([
+            Line::from(""),
+            sequence_row(&["c", "i", "\""], self.text_object.stage, theme),
+            progress_line("STEP", self.text_object.stage, 3, theme),
             Line::from(Span::styled(
-                "EX SUBSTITUTE",
-                Style::default().fg(theme.success),
+                text_object_status(self.text_object.stage, self.text_object.complete),
+                status_style(self.text_object.complete, theme),
             )),
-            Line::from("Text buffer:"),
-            Line::from(self.substitute.text.clone()),
             Line::from(""),
-            Line::from(format!("Command: {command}")),
-            Line::from(format!("Try: {SUBSTITUTE_COMMAND}")),
-            Line::from(""),
-            Line::from(self.substitute.message.clone()),
-        ]
+            key_row(&["c", "i", "\"", "r reset", "Esc menu"], theme),
+        ]);
+        lines
     }
 
-    fn text_object_lines(&self, _width: u16, theme: Theme) -> Vec<Line<'static>> {
-        let text = if self.text_object.complete {
-            "const message = \"changed cleanly\";"
-        } else {
-            "const message = \"change this text\";"
-        };
-        vec![
-            Line::from(Span::styled(
-                "TEXT OBJECTS — OPERATOR + MOTION",
-                Style::default()
-                    .fg(theme.success)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(text),
-            Line::from(""),
-            Line::from("Target sequence: c i \""),
-            Line::from(self.text_object.message.clone()),
-        ]
-    }
-
-    fn search_lines(&self, _width: u16, theme: Theme) -> Vec<Line<'static>> {
+    fn search_lines(&self, width: u16, theme: Theme) -> Vec<Line<'static>> {
         let query = if self.search.command_mode {
             format!("/{}▌", self.search.query)
+        } else if self.search.complete {
+            "/TODO".to_owned()
         } else {
-            String::from("/TODO")
+            "/▌".to_owned()
         };
-        vec![
-            Line::from(Span::styled(
-                "SEARCH & JUMP — / n",
-                Style::default()
-                    .fg(theme.success)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from("deploy.sh"),
-            Line::from("notes.md"),
-            Line::from("TODO: replace the temporary path"),
-            Line::from("release.txt"),
+        let mut lines = game_header(
+            "04",
+            "SEARCH HUNT",
+            "scan the buffer, then jump between live targets",
+            width,
+            theme,
+        );
+        lines.push(Line::from(Span::styled(
+            "LIVE BUFFER  /  move with h j k l   /TODO then n",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )));
+        for y in 0..7 {
+            lines.push(search_board_line(&self.search, y, theme));
+        }
+        lines.extend([
             Line::from(""),
-            Line::from(format!("search: {query}")),
-            Line::from(self.search.message.clone()),
-        ]
+            Line::from(Span::styled(
+                "SEARCH REGISTER",
+                theme.muted().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                query,
+                cursor_style_for_command(self.search.command_mode, theme),
+            )),
+            Line::from(Span::styled(
+                search_status(
+                    self.search.command_mode,
+                    self.search.match_found,
+                    self.search.complete,
+                ),
+                status_style(self.search.complete, theme),
+            )),
+            Line::from(""),
+            key_row(&["h j k l", "move", "/TODO", "n next", "r reset"], theme),
+        ]);
+        lines
     }
 
-    fn word_hop_lines(&self, _width: u16, theme: Theme) -> Vec<Line<'static>> {
-        let words = self
-            .word_hop
-            .words
-            .iter()
-            .enumerate()
-            .map(|(index, word)| {
-                if index == self.word_hop.cursor {
-                    Span::styled(
-                        format!("[{word}] "),
-                        theme.selected().add_modifier(Modifier::BOLD),
-                    )
-                } else {
-                    Span::styled(format!(" {word}  "), theme.dim())
-                }
-            })
-            .collect::<Vec<_>>();
-        vec![
+    fn word_hop_lines(&self, width: u16, theme: Theme) -> Vec<Line<'static>> {
+        let mut words = Vec::new();
+        for (index, word) in self.word_hop.words.iter().enumerate() {
+            let style = match index.cmp(&self.word_hop.cursor) {
+                Ordering::Equal => theme.selected().add_modifier(Modifier::BOLD),
+                Ordering::Less => Style::default().fg(theme.success),
+                Ordering::Greater => theme.dim(),
+            };
+            words.push(Span::styled(format!(" {word} "), style));
+            if index + 1 < self.word_hop.words.len() {
+                words.push(Span::styled("  →  ", theme.muted()));
+            }
+        }
+        let mut lines = game_header(
+            "06",
+            "WORD HOP",
+            "move through a command buffer",
+            width,
+            theme,
+        );
+        lines.extend([
             Line::from(Span::styled(
-                "WORD HOP — NORMAL MODE",
+                "COMMAND BUFFER",
+                theme.accent().add_modifier(Modifier::BOLD),
+            )),
+            Line::from(words),
+            Line::from(""),
+            progress_line("JUMP", self.word_hop.cursor, WORD_HOP_TARGET, theme),
+            Line::from(Span::styled(
+                word_hop_status(self.word_hop.cursor, self.word_hop.used_word_motion),
+                status_style(self.word_hop.is_complete(), theme),
+            )),
+            Line::from(""),
+            key_row(&["w next", "b back", "e end", "r reset"], theme),
+        ]);
+        lines
+    }
+}
+
+fn text_object_board_line(game: &TextObjectGame, y: i16, theme: Theme) -> Line<'static> {
+    let mut spans = vec![Span::styled("  ", theme.muted())];
+    let characters = TEXT_OBJECT_BUFFER.chars().collect::<Vec<_>>();
+    for x in 0..28 {
+        let point = Point { x, y };
+        let character = if y == 3 {
+            characters
+                .get(usize::try_from(x).unwrap_or(usize::MAX))
+                .copied()
+        } else {
+            None
+        };
+        let (symbol, style) = if game.player == point {
+            (
+                character.map_or("◆".to_owned(), |value| value.to_string()),
+                theme.selected().add_modifier(Modifier::BOLD),
+            )
+        } else if game.target == point && !game.complete {
+            (
+                character.map_or("✦".to_owned(), |value| value.to_string()),
+                theme.selected().fg(theme.warn).add_modifier(Modifier::BOLD),
+            )
+        } else {
+            (
+                character.map_or(" ".to_owned(), |value| value.to_string()),
+                Style::default().fg(theme.fg),
+            )
+        };
+        spans.push(Span::styled(symbol, style));
+    }
+    Line::from(spans)
+}
+
+fn search_board_line(game: &SearchGame, y: i16, theme: Theme) -> Line<'static> {
+    let mut spans = vec![Span::styled("  ", theme.muted())];
+    let text = SEARCH_BUFFER
+        .get(usize::try_from(y).unwrap_or(usize::MAX))
+        .copied()
+        .unwrap_or_default();
+    let characters = text.chars().collect::<Vec<_>>();
+    let first_target = Point { x: 5, y: 2 };
+    let second_target = Point { x: 5, y: 5 };
+    for x in 0..32 {
+        let point = Point { x, y };
+        let character = characters
+            .get(usize::try_from(x).unwrap_or(usize::MAX))
+            .copied()
+            .unwrap_or(' ');
+        let (symbol, style) = if game.cursor == point {
+            (
+                character.to_string(),
+                theme.selected().add_modifier(Modifier::BOLD),
+            )
+        } else if point == second_target && game.complete {
+            (
+                character.to_string(),
                 Style::default()
                     .fg(theme.success)
                     .add_modifier(Modifier::BOLD),
-            )),
-            Line::from("Move the cursor through a command buffer:"),
-            Line::from(words),
-            Line::from(""),
-            Line::from("w next word   b previous word   e word end"),
-            Line::from(self.word_hop.message.clone()),
-        ]
+            )
+        } else if point == first_target && game.match_found {
+            (
+                character.to_string(),
+                Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+            )
+        } else {
+            (character.to_string(), Style::default().fg(theme.fg))
+        };
+        spans.push(Span::styled(symbol, style));
+    }
+    Line::from(spans)
+}
+
+fn menu_side_lines(theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled("6 LEVELS  /  ONE KEY AT A TIME", theme.dim())),
+        Line::from(""),
+        key_row(&["1 snake", "2 repeat", "3 objects"], theme),
+        key_row(&["4 search", "5 substitute", "6 words"], theme),
+        Line::from(""),
+        Line::from(Span::styled("↑↓ choose   Enter play", theme.muted())),
+    ]
+}
+
+fn snake_side_lines(game: &SnakeGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "01 / 06  SNAKE",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        progress_line("EAT", game.score, SNAKE_TARGETS, theme),
+        Line::from(Span::styled("h j k l  move", theme.fg)),
+        Line::from(Span::styled("r reset   Esc menu", theme.muted())),
+        Line::from(""),
+        Line::from(Span::styled(
+            if game.complete {
+                "✓ clear"
+            } else if game.game_over {
+                "wall hit"
+            } else {
+                "live"
+            },
+            status_style(game.complete, theme),
+        )),
+    ]
+}
+
+fn repeat_side_lines(game: &RepeatGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "02 / 06  WHACK-A-MOLE",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        progress_line("DELETE", game.score, HUNT_TARGETS, theme),
+        Line::from(Span::styled("h j k l  move", theme.fg)),
+        Line::from(Span::styled("x  delete target", theme.dim())),
+        Line::from(Span::styled("r reset   Esc menu", theme.muted())),
+    ]
+}
+
+fn hunt_board_line(game: &RepeatGame, y: i16, theme: Theme) -> Line<'static> {
+    let mut spans = vec![Span::styled("  ", theme.muted())];
+    for x in 0..HUNT_WIDTH {
+        let point = Point { x, y };
+        let (symbol, style) = if game.player == point {
+            ("◆", theme.selected().add_modifier(Modifier::BOLD))
+        } else if game.target == point {
+            (
+                "✦",
+                theme.selected().add_modifier(Modifier::BOLD).fg(theme.warn),
+            )
+        } else {
+            ("·", Style::default().fg(theme.overlay))
+        };
+        spans.push(Span::styled(symbol, style));
+    }
+    Line::from(spans)
+}
+
+fn text_object_side_lines(game: &TextObjectGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "03 / 06  OBJECTS",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        sequence_row(&["c", "i", "\""], game.stage, theme),
+        progress_line("STEP", game.stage, 3, theme),
+        Line::from(Span::styled("h j k l  reach the quote", theme.fg)),
+        Line::from(Span::styled("r reset   Esc menu", theme.muted())),
+    ]
+}
+
+fn search_side_lines(game: &SearchGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "04 / 06  SEARCH",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            if game.command_mode {
+                "/ typing"
+            } else if game.complete {
+                "✓ found"
+            } else if game.match_found {
+                "✓ first found"
+            } else {
+                "/ ready"
+            },
+            status_style(game.complete, theme),
+        )),
+        Line::from(Span::styled("h j k l  /TODO   n", theme.fg)),
+        Line::from(Span::styled("r reset   Esc menu", theme.muted())),
+    ]
+}
+
+fn substitute_side_lines(game: &SubstituteGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "05 / 06  EX",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled("hate  →  love", theme.warn)),
+        Line::from(Span::styled(
+            if game.complete {
+                "✓ 2 replacements"
+            } else {
+                "global / g required"
+            },
+            status_style(game.complete, theme),
+        )),
+        Line::from(Span::styled(": command   Enter run", theme.fg)),
+        Line::from(Span::styled("r reset   Esc menu", theme.muted())),
+    ]
+}
+
+fn substitute_word_field(complete: bool, theme: Theme) -> Line<'static> {
+    let (word, style) = if complete {
+        (
+            " LOVE ",
+            Style::default()
+                .fg(theme.selected_fg)
+                .bg(theme.success)
+                .bold(),
+        )
+    } else {
+        (
+            " HATE ",
+            theme
+                .selected()
+                .fg(theme.error)
+                .add_modifier(Modifier::BOLD),
+        )
+    };
+    Line::from(vec![
+        Span::styled("      ", theme.muted()),
+        Span::styled(word, style),
+        Span::styled(
+            "    ✦    ",
+            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(word, style),
+        Span::styled("      targets", theme.muted()),
+    ])
+}
+
+fn word_hop_side_lines(game: &WordHopGame, theme: Theme) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            "06 / 06  WORD HOP",
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        progress_line("JUMP", game.cursor, WORD_HOP_TARGET, theme),
+        Line::from(Span::styled("w next   b back", theme.fg)),
+        Line::from(Span::styled("e end    r reset", theme.dim())),
+        Line::from(Span::styled("Esc menu", theme.muted())),
+    ]
+}
+
+fn game_header(
+    level: &str,
+    title: &str,
+    subtitle: &str,
+    width: u16,
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::from(Span::styled(
+            format!("VIM DOJO  /  {level} OF {VIM_LEVEL_COUNT}  /  {title}"),
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "─".repeat(usize::from(width.saturating_sub(1))),
+            theme.muted(),
+        )),
+        Line::from(Span::styled(subtitle.to_owned(), theme.fg)),
+        Line::from(""),
+    ]
+}
+
+fn progress_line(label: &str, current: usize, total: usize, theme: Theme) -> Line<'static> {
+    let total = total.max(1);
+    let current = current.min(total);
+    let bar_width = 18;
+    let filled = bar_width * current / total;
+    Line::from(vec![
+        Span::styled(format!("{label:<6}"), theme.muted()),
+        Span::styled("█".repeat(filled), theme.success),
+        Span::styled("░".repeat(bar_width - filled), theme.overlay),
+        Span::styled(format!(" {:>3}%", current * 100 / total), theme.accent()),
+    ])
+}
+
+fn key_row(labels: &[&str], theme: Theme) -> Line<'static> {
+    let mut spans = Vec::with_capacity(labels.len().saturating_mul(2));
+    for (index, label) in labels.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::raw("  "));
+        }
+        spans.push(Span::styled(
+            format!(" {label} "),
+            Style::default()
+                .fg(theme.accent)
+                .bg(theme.overlay)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    Line::from(spans)
+}
+
+fn sequence_row(keys: &[&str], stage: usize, theme: Theme) -> Line<'static> {
+    let mut spans = Vec::with_capacity(keys.len().saturating_mul(2));
+    for (index, key) in keys.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled("  →  ", theme.muted()));
+        }
+        let style = match index.cmp(&stage) {
+            Ordering::Less => Style::default()
+                .fg(theme.selected_fg)
+                .bg(theme.success)
+                .add_modifier(Modifier::BOLD),
+            Ordering::Equal => theme.selected(),
+            Ordering::Greater => Style::default().fg(theme.muted).bg(theme.overlay),
+        };
+        spans.push(Span::styled(format!(" {key} "), style));
+    }
+    Line::from(spans)
+}
+
+fn status_style(complete: bool, theme: Theme) -> Style {
+    if complete {
+        theme.accent().add_modifier(Modifier::BOLD)
+    } else {
+        theme.dim()
+    }
+}
+
+fn cursor_style_for_command(active: bool, theme: Theme) -> Style {
+    if active {
+        theme.selected()
+    } else {
+        Style::default()
+            .fg(theme.fg)
+            .bg(theme.overlay)
+            .add_modifier(Modifier::BOLD)
+    }
+}
+
+fn replacement_line(text: &str, needle: &str, color: ratatui::style::Color) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (index, part) in text.split(needle).enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(
+                needle.to_owned(),
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
+        spans.push(Span::raw(part.to_owned()));
+    }
+    Line::from(spans)
+}
+
+fn text_object_status(stage: usize, complete: bool) -> &'static str {
+    if complete {
+        "✓ INNER TEXT SELECTED  /  clean motion"
+    } else {
+        match stage {
+            0 => "WAITING  /  press c",
+            1 => "OPERATOR SET  /  press i",
+            _ => "TEXT OBJECT READY  /  press \"",
+        }
+    }
+}
+
+fn search_status(command_mode: bool, match_found: bool, complete: bool) -> &'static str {
+    if complete {
+        "✓ MATCH FOUND  /  press n to repeat"
+    } else if command_mode {
+        "SEARCHING  /  type TODO, then Enter"
+    } else if match_found {
+        "FIRST MATCH  /  press n for the next target"
+    } else {
+        "READY  /  press /"
+    }
+}
+
+fn word_hop_status(cursor: usize, used_motion: bool) -> &'static str {
+    if cursor >= WORD_HOP_TARGET {
+        "✓ DESTINATION REACHED  /  chmod"
+    } else if used_motion {
+        "MOTION REGISTERED  /  keep hopping"
+    } else {
+        "READY  /  press w, b, or e"
     }
 }
 
@@ -1167,32 +1569,6 @@ fn menu_item(selected: bool, label: &str, theme: Theme) -> Line<'static> {
     ))
 }
 
-fn cursor_line(text: &str, cursor: usize, mode: EditMode, theme: Theme) -> Line<'static> {
-    let cursor = cursor.min(text.len());
-    let mut spans = vec![Span::raw(text[..cursor].to_owned())];
-    let cursor_end = next_boundary(text, cursor);
-    if cursor < text.len() {
-        spans.push(Span::styled(
-            text[cursor..cursor_end].to_owned(),
-            cursor_style(mode, theme),
-        ));
-        spans.push(Span::raw(text[cursor_end..].to_owned()));
-    } else {
-        spans.push(Span::styled(" ", cursor_style(mode, theme)));
-    }
-    Line::from(spans)
-}
-
-fn cursor_style(mode: EditMode, theme: Theme) -> Style {
-    match mode {
-        EditMode::Normal => theme.selected(),
-        EditMode::Insert => Style::default()
-            .fg(theme.selected_fg)
-            .bg(theme.accent)
-            .add_modifier(Modifier::BOLD),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1201,14 +1577,12 @@ mod tests {
     fn repeat_game_teaches_insert_and_completes() {
         let mut dojo = VimDojo::default();
         dojo.handle_key(KeyCode::Char('2'), KeyModifiers::NONE);
-        dojo.handle_key(KeyCode::Char('i'), KeyModifiers::NONE);
-        for character in REPEAT_TARGET.chars() {
-            dojo.handle_key(KeyCode::Char(character), KeyModifiers::NONE);
-        }
-        dojo.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        dojo.repeat.player = dojo.repeat.target;
+        dojo.handle_key(KeyCode::Char('x'), KeyModifiers::NONE);
 
         assert_eq!(dojo.screen, Screen::Repeat);
-        assert!(dojo.repeat.is_complete());
+        assert_eq!(dojo.repeat.score, 1);
+        assert!(!dojo.repeat.is_complete());
     }
 
     #[test]
@@ -1246,6 +1620,7 @@ mod tests {
     fn text_object_and_search_levels_require_their_real_sequences() {
         let mut dojo = VimDojo::default();
         dojo.handle_key(KeyCode::Char('3'), KeyModifiers::NONE);
+        dojo.text_object.player = dojo.text_object.target;
         for key in ['c', 'i', '"'] {
             dojo.handle_key(KeyCode::Char(key), KeyModifiers::NONE);
         }
@@ -1258,6 +1633,8 @@ mod tests {
             dojo.handle_key(KeyCode::Char(character), KeyModifiers::NONE);
         }
         dojo.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(dojo.search.match_found);
+        dojo.handle_key(KeyCode::Char('n'), KeyModifiers::NONE);
         assert!(dojo.search.complete);
     }
 }

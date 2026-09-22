@@ -6,9 +6,11 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use learn_challenge::{CompiledChallenge, ContentPack, compile_directory};
 use learn_core::{
     ChallengeId, ChallengeProgress, CompletionStatus, GraphError, Skill, SkillGraph, SkillId,
@@ -26,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
 /// JSON-backed progress file used by the first local daemon release.
@@ -275,6 +277,198 @@ impl Daemon {
                 }
             });
         }
+    }
+
+    /// Serve the browser bridge on a loopback WebSocket listener.
+    ///
+    /// The bridge translates JSON messages to the same typed request handlers
+    /// used by the Unix-socket TUI. It is intentionally loopback-only.
+    pub async fn serve_websocket(&self, address: SocketAddr) -> Result<(), DaemonError> {
+        let listener = TcpListener::bind(address).await.map_err(DaemonError::Io)?;
+        loop {
+            let (stream, _) = listener.accept().await.map_err(DaemonError::Io)?;
+            let daemon = self.clone();
+            tokio::spawn(async move {
+                if let Err(error) = daemon.handle_websocket(stream).await {
+                    tracing::debug!(%error, "web bridge client disconnected");
+                }
+            });
+        }
+    }
+
+    async fn handle_websocket(&self, stream: TcpStream) -> Result<(), DaemonError> {
+        let (mut reader, writer) = stream.into_split();
+        let handshake = read_websocket_handshake(&mut reader).await?;
+        if !handshake.target_is_websocket() {
+            return Err(DaemonError::Protocol("web bridge expects /ws".to_owned()));
+        }
+        let Some(key) = handshake.header("sec-websocket-key") else {
+            return Err(DaemonError::Protocol(
+                "websocket handshake omitted Sec-WebSocket-Key".to_owned(),
+            ));
+        };
+        let accept = websocket_accept_key(key);
+        let writer = Arc::new(AsyncMutex::new(writer));
+        write_http_handshake(&writer, &accept).await?;
+
+        let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
+        let event_writer = Arc::clone(&writer);
+        let event_task = tokio::spawn(async move {
+            while let Some(event) = event_receiver.recv().await {
+                let Some(payload) = websocket_event_json(&event) else {
+                    continue;
+                };
+                if write_websocket_text(&event_writer, &payload).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let result = loop {
+            let Some((opcode, payload)) = read_websocket_frame(&mut reader).await? else {
+                break Ok(());
+            };
+            match opcode {
+                0x1 => {
+                    let request: WebRequest = serde_json::from_slice(&payload)
+                        .map_err(|error| DaemonError::Protocol(error.to_string()))?;
+                    let request_type = request.kind.clone();
+                    let request_id = request.request_id;
+                    let envelope =
+                        bridge_request_envelope(&request).map_err(DaemonError::Protocol)?;
+                    let (response, _) = self.handle_request(envelope, &event_sender);
+                    let json = self.bridge_response_json(request_id, &request_type, &response);
+                    write_websocket_text(&writer, &json.to_string()).await?;
+                }
+                0x8 => break Ok(()),
+                0x9 => write_websocket_frame(&writer, 0xA, &payload).await?,
+                _ => {}
+            }
+        };
+        drop(event_sender);
+        event_task.abort();
+        result
+    }
+
+    fn bridge_response_json(
+        &self,
+        request_id: u64,
+        request_type: &str,
+        envelope: &Envelope,
+    ) -> serde_json::Value {
+        let Some(envelope::Body::Response(response)) = envelope.body.as_ref() else {
+            return serde_json::json!({
+                "type": "response",
+                "requestId": request_id,
+                "ok": false,
+                "error": "daemon returned an invalid response envelope",
+            });
+        };
+        if !response.ok {
+            return serde_json::json!({
+                "type": "response",
+                "requestId": request_id,
+                "ok": false,
+                "error": response.error,
+            });
+        }
+        let mut json = serde_json::json!({
+            "type": "response",
+            "requestId": request_id,
+            "ok": true,
+        });
+        match (request_type, response.kind.as_ref()) {
+            ("hello", Some(response::Kind::Hello(hello))) => {
+                json["snapshot"] = self.web_snapshot(&hello.server_version);
+            }
+            ("open_session", Some(response::Kind::Challenge(challenge))) => {
+                json["session"] = serde_json::json!({
+                    "id": challenge.session_id,
+                    "challengeId": challenge.id,
+                    "title": challenge.title,
+                    "objective": challenge.objective,
+                });
+            }
+            ("search_docs", Some(response::Kind::Docs(docs))) => {
+                json["results"] = serde_json::Value::Array(
+                    docs.results
+                        .iter()
+                        .map(|result| {
+                            serde_json::json!({
+                                "id": result.id,
+                                "title": result.title,
+                                "snippet": result.snippet,
+                            })
+                        })
+                        .collect(),
+                );
+            }
+            ("status", Some(response::Kind::Status(status))) => {
+                json["status"] = serde_json::json!({
+                    "challengeCount": status.challenge_count,
+                    "completedCount": status.completed_count,
+                    "runtimeSummary": status.runtime_summary,
+                });
+            }
+            _ => {}
+        }
+        json
+    }
+
+    fn web_snapshot(&self, server_version: &str) -> serde_json::Value {
+        let progress = self.progress().unwrap_or_default();
+        let completed_count = progress
+            .iter()
+            .filter(|item| item.status == CompletionStatus::Completed)
+            .count();
+        let challenges = self
+            .content
+            .challenges
+            .iter()
+            .enumerate()
+            .map(|(index, challenge)| {
+                let challenge_id = challenge.spec.id.to_string();
+                let saved = progress
+                    .iter()
+                    .find(|item| item.challenge_id.as_str() == challenge_id);
+                let state = saved.map_or("available", |item| match item.status {
+                    CompletionStatus::Completed => "completed",
+                    CompletionStatus::InProgress => "in_progress",
+                    CompletionStatus::Locked => "available",
+                });
+                serde_json::json!({
+                    "id": challenge_id,
+                    "title": challenge.spec.meta.title,
+                    "objective": challenge.spec.objective.text,
+                    "track": challenge.spec.skills.teaches.first().map_or("FOUNDATIONS", |track| track.as_str()).to_ascii_uppercase(),
+                    "lesson": format!("{:02} / {:02}", index + 1, self.content.challenges.len()),
+                    "state": state,
+                    "attempts": saved.map_or(0, |item| item.attempts),
+                    "hintCount": challenge.spec.hints.len(),
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({
+            "protocolVersion": PROTOCOL_VERSION,
+            "serverVersion": server_version,
+            "runtime": {
+                "ready": self.runtime.usable(),
+                "summary": self.runtime.render(),
+                "challengeCount": self.content.challenges.len(),
+                "completedCount": completed_count,
+            },
+            "challenges": challenges,
+            "progress": progress.iter().map(|item| serde_json::json!({
+                "challengeId": item.challenge_id,
+                "state": match item.status {
+                    CompletionStatus::Completed => "completed",
+                    CompletionStatus::InProgress => "in_progress",
+                    CompletionStatus::Locked => "available",
+                },
+                "attempts": item.attempts,
+                "hintsUsed": item.hints_used.len(),
+            })).collect::<Vec<_>>(),
+        })
     }
 
     async fn handle_connection(&self, stream: UnixStream) -> Result<(), DaemonError> {
@@ -642,6 +836,331 @@ impl Daemon {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct WebRequest {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(rename = "requestId")]
+    request_id: u64,
+    #[serde(rename = "challengeId")]
+    challenge_id: Option<String>,
+    #[serde(rename = "sessionId")]
+    session_id: Option<String>,
+    client_kind: Option<String>,
+    data: Option<String>,
+    query: Option<String>,
+    limit: Option<u32>,
+    columns: Option<u32>,
+    rows: Option<u32>,
+}
+
+fn bridge_request_envelope(request: &WebRequest) -> Result<Envelope, String> {
+    use learn_protocol::{
+        CloseSession, GraphRequest, HelloRequest, OpenSessionRequest, ResetRequest,
+        SearchDocsRequest, StatusRequest, TerminalInput, TerminalResize,
+    };
+    let kind = match request.kind.as_str() {
+        "hello" => request::Kind::Hello(HelloRequest {
+            client_version: "web".to_owned(),
+            client_kind: request
+                .client_kind
+                .clone()
+                .unwrap_or_else(|| "web".to_owned()),
+        }),
+        "status" => request::Kind::Status(StatusRequest {}),
+        "open_session" => request::Kind::OpenSession(OpenSessionRequest {
+            challenge_id: required_field(&request.challenge_id, "challengeId")?,
+            columns: request.columns.unwrap_or(100),
+            rows: request.rows.unwrap_or(32),
+        }),
+        "terminal_input" => request::Kind::TerminalInput(TerminalInput {
+            session_id: required_field(&request.session_id, "sessionId")?,
+            data: request.data.clone().unwrap_or_default().into_bytes(),
+        }),
+        "terminal_resize" => request::Kind::TerminalResize(TerminalResize {
+            session_id: required_field(&request.session_id, "sessionId")?,
+            columns: request.columns.unwrap_or(100),
+            rows: request.rows.unwrap_or(32),
+        }),
+        "close_session" => request::Kind::CloseSession(CloseSession {
+            session_id: required_field(&request.session_id, "sessionId")?,
+        }),
+        "reset" => request::Kind::Reset(ResetRequest {
+            challenge_id: required_field(&request.challenge_id, "challengeId")?,
+        }),
+        "search_docs" => request::Kind::SearchDocs(SearchDocsRequest {
+            query: request.query.clone().unwrap_or_default(),
+            limit: request.limit.unwrap_or(5),
+        }),
+        "graph" => request::Kind::Graph(GraphRequest {}),
+        other => return Err(format!("unknown web request type `{other}`")),
+    };
+    Ok(Envelope {
+        protocol_version: PROTOCOL_VERSION,
+        message_id: request.request_id,
+        body: Some(envelope::Body::Request(learn_protocol::Request {
+            kind: Some(kind),
+        })),
+    })
+}
+
+fn required_field(value: &Option<String>, name: &str) -> Result<String, String> {
+    value
+        .clone()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| format!("missing `{name}`"))
+}
+
+fn websocket_event_json(envelope: &Envelope) -> Option<String> {
+    let Some(envelope::Body::Event(event)) = envelope.body.as_ref() else {
+        return None;
+    };
+    let json = match event.kind.as_ref()? {
+        learn_protocol::event::Kind::TerminalOutput(output) => serde_json::json!({
+            "type": "terminal_output",
+            "sessionId": output.session_id,
+            "data": String::from_utf8_lossy(&output.data),
+        }),
+        learn_protocol::event::Kind::ChallengeState(state) => serde_json::json!({
+            "type": "challenge_state",
+            "challengeId": state.challenge_id,
+            "state": state.state,
+        }),
+    };
+    Some(json.to_string())
+}
+
+#[derive(Debug)]
+struct WebSocketHandshake {
+    request_line: String,
+    headers: Vec<(String, String)>,
+}
+
+impl WebSocketHandshake {
+    fn target_is_websocket(&self) -> bool {
+        self.request_line
+            .split_whitespace()
+            .nth(1)
+            .is_some_and(|target| target == "/ws")
+    }
+
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
+}
+
+async fn read_websocket_handshake(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+) -> Result<WebSocketHandshake, DaemonError> {
+    let mut bytes = Vec::with_capacity(1024);
+    loop {
+        let mut chunk = [0_u8; 1024];
+        let count = reader.read(&mut chunk).await.map_err(DaemonError::Io)?;
+        if count == 0 {
+            return Err(DaemonError::Protocol(
+                "websocket handshake ended early".to_owned(),
+            ));
+        }
+        bytes.extend_from_slice(&chunk[..count]);
+        if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+        if bytes.len() > 16 * 1024 {
+            return Err(DaemonError::Protocol(
+                "websocket handshake is too large".to_owned(),
+            ));
+        }
+    }
+    let request = String::from_utf8(bytes)
+        .map_err(|_| DaemonError::Protocol("websocket handshake was not UTF-8".to_owned()))?;
+    let mut lines = request.split("\r\n");
+    let request_line = lines.next().unwrap_or_default().to_owned();
+    let headers = lines
+        .filter_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            Some((name.trim().to_owned(), value.trim().to_owned()))
+        })
+        .collect();
+    Ok(WebSocketHandshake {
+        request_line,
+        headers,
+    })
+}
+
+async fn write_http_handshake(
+    writer: &AsyncMutex<tokio::net::tcp::OwnedWriteHalf>,
+    accept: &str,
+) -> Result<(), DaemonError> {
+    let response = format!(
+        "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"
+    );
+    writer
+        .lock()
+        .await
+        .write_all(response.as_bytes())
+        .await
+        .map_err(DaemonError::Io)
+}
+
+async fn write_websocket_text(
+    writer: &AsyncMutex<tokio::net::tcp::OwnedWriteHalf>,
+    text: &str,
+) -> Result<(), DaemonError> {
+    write_websocket_frame(writer, 0x1, text.as_bytes()).await
+}
+
+async fn write_websocket_frame(
+    writer: &AsyncMutex<tokio::net::tcp::OwnedWriteHalf>,
+    opcode: u8,
+    payload: &[u8],
+) -> Result<(), DaemonError> {
+    let mut frame = Vec::with_capacity(payload.len() + 10);
+    frame.push(0x80 | (opcode & 0x0f));
+    match payload.len() {
+        length @ 0..=125 => frame.push(length as u8),
+        length @ 126..=65_535 => {
+            frame.push(126);
+            frame.extend_from_slice(&(length as u16).to_be_bytes());
+        }
+        length => {
+            frame.push(127);
+            frame.extend_from_slice(&(length as u64).to_be_bytes());
+        }
+    }
+    frame.extend_from_slice(payload);
+    writer
+        .lock()
+        .await
+        .write_all(&frame)
+        .await
+        .map_err(DaemonError::Io)
+}
+
+async fn read_websocket_frame(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+) -> Result<Option<(u8, Vec<u8>)>, DaemonError> {
+    let mut header = [0_u8; 2];
+    match reader.read_exact(&mut header).await {
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(error) => return Err(DaemonError::Io(error)),
+    }
+    let opcode = header[0] & 0x0f;
+    if header[0] & 0x80 == 0 {
+        return Err(DaemonError::Protocol(
+            "fragmented websocket messages are unsupported".to_owned(),
+        ));
+    }
+    let masked = header[1] & 0x80 != 0;
+    let mut length = u64::from(header[1] & 0x7f);
+    if length == 126 {
+        let mut bytes = [0_u8; 2];
+        reader
+            .read_exact(&mut bytes)
+            .await
+            .map_err(DaemonError::Io)?;
+        length = u64::from(u16::from_be_bytes(bytes));
+    } else if length == 127 {
+        let mut bytes = [0_u8; 8];
+        reader
+            .read_exact(&mut bytes)
+            .await
+            .map_err(DaemonError::Io)?;
+        length = u64::from_be_bytes(bytes);
+    }
+    if length > learn_protocol::MAX_FRAME_SIZE as u64 {
+        return Err(DaemonError::Protocol(
+            "websocket payload exceeds 8 MiB limit".to_owned(),
+        ));
+    }
+    let mut mask = [0_u8; 4];
+    if masked {
+        reader
+            .read_exact(&mut mask)
+            .await
+            .map_err(DaemonError::Io)?;
+    }
+    let mut payload = vec![0_u8; length as usize];
+    reader
+        .read_exact(&mut payload)
+        .await
+        .map_err(DaemonError::Io)?;
+    if masked {
+        for (index, byte) in payload.iter_mut().enumerate() {
+            *byte ^= mask[index % 4];
+        }
+    }
+    Ok(Some((opcode, payload)))
+}
+
+fn websocket_accept_key(key: &str) -> String {
+    let mut input = key.as_bytes().to_vec();
+    input.extend_from_slice(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+    BASE64.encode(sha1_digest(&input))
+}
+
+fn sha1_digest(input: &[u8]) -> [u8; 20] {
+    let mut message = input.to_vec();
+    let bit_length = (message.len() as u64).saturating_mul(8);
+    message.push(0x80);
+    while message.len() % 64 != 56 {
+        message.push(0);
+    }
+    message.extend_from_slice(&bit_length.to_be_bytes());
+    let mut state = [
+        0x6745_2301_u32,
+        0xEFCD_AB89,
+        0x98BA_DCFE,
+        0x1032_5476,
+        0xC3D2_E1F0,
+    ];
+    for chunk in message.chunks_exact(64) {
+        let mut words = [0_u32; 80];
+        for (index, bytes) in chunk.chunks_exact(4).enumerate() {
+            words[index] = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        }
+        for index in 16..80 {
+            words[index] =
+                (words[index - 3] ^ words[index - 8] ^ words[index - 14] ^ words[index - 16])
+                    .rotate_left(1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e) =
+            (state[0], state[1], state[2], state[3], state[4]);
+        for (index, word) in words.iter().enumerate() {
+            let (function, constant) = match index {
+                0..=19 => ((b & c) | ((!b) & d), 0x5A82_7999),
+                20..=39 => (b ^ c ^ d, 0x6ED9_EBA1),
+                40..=59 => ((b & c) | (b & d) | (c & d), 0x8F1B_BCDC),
+                _ => (b ^ c ^ d, 0xCA62_C1D6),
+            };
+            let temporary = a
+                .rotate_left(5)
+                .wrapping_add(function)
+                .wrapping_add(e)
+                .wrapping_add(constant)
+                .wrapping_add(*word);
+            e = d;
+            d = c;
+            c = b.rotate_left(30);
+            b = a;
+            a = temporary;
+        }
+        state[0] = state[0].wrapping_add(a);
+        state[1] = state[1].wrapping_add(b);
+        state[2] = state[2].wrapping_add(c);
+        state[3] = state[3].wrapping_add(d);
+        state[4] = state[4].wrapping_add(e);
+    }
+    let mut digest = [0_u8; 20];
+    for (index, word) in state.iter().enumerate() {
+        digest[index * 4..index * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    digest
+}
+
 async fn read_envelope(reader: &mut OwnedReadHalf) -> Result<Envelope, DaemonError> {
     let frame_length = reader.read_u32().await.map_err(DaemonError::Io)? as usize;
     if frame_length > learn_protocol::MAX_FRAME_SIZE {
@@ -970,6 +1489,11 @@ pub fn socket_path() -> PathBuf {
         .join("learn/daemon.sock")
 }
 
+/// Return the loopback address used by the browser WebSocket bridge.
+pub fn websocket_address() -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], 8787))
+}
+
 fn runtime_directory_is_writable(directory: &Path) -> bool {
     if !directory.is_dir() {
         return false;
@@ -1098,6 +1622,14 @@ mod tests {
             assert_eq!(store.all()[0].challenge_id, second);
         }
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn websocket_accept_key_matches_rfc_example() {
+        assert_eq!(
+            websocket_accept_key("dGhlIHNhbXBsZSBub25jZQ=="),
+            "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+        );
     }
 
     #[tokio::test]

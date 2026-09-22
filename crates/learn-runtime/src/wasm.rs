@@ -367,7 +367,7 @@ fn prompt(cwd: &str) -> String {
             }
         },
     );
-    format!("\r\x1b]777;LEARN_PWD;{cwd}\x07╭─ learner@learn  {display}  ◈\r\n╰─❯ ")
+    format!("\r\x1b]777;LEARN_PWD;{cwd}\x07learner@learn  {display}  ◈\r\n❯ ")
 }
 
 const SHELL_BANNER: &str = "\r\n  ╭──────────────────────────────────────────────────────╮\r\n  │   ██╗     ███████╗ █████╗ ██████╗ ███╗   ██╗        │\r\n  │   ██║     ██╔════╝██╔══██╗██╔══██╗████╗  ██║        │\r\n  │   ██║     █████╗  ███████║██████╔╝██╔██╗ ██║        │\r\n  │   ██║     ██╔══╝  ██╔══██║██╔══██╗██║╚██╗██║        │\r\n  │   ███████╗███████╗██║  ██║██║  ██║██║ ╚████║        │\r\n  │   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝        │\r\n  │                                                      │\r\n  │   ██╗     ██╗███╗   ██╗██╗   ██╗██╗  ██╗           │\r\n  │   ██║     ██║████╗  ██║██║   ██║╚██╗██╔╝           │\r\n  │   ██║     ██║██╔██╗ ██║██║   ██║ ╚███╔╝            │\r\n  │   ██║     ██║██║╚██╗██║██║   ██║ ██╔██╗            │\r\n  │   ███████╗██║██║ ╚████║╚██████╔╝██╔╝ ██╗           │\r\n  │   ╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝  ╚═╝           │\r\n  ╰──── shell dojo • type a command • make progress ───╯\r\n\r\n";
@@ -1227,8 +1227,14 @@ fn split_unquoted(value: &str, delimiter: char) -> Vec<String> {
     let mut quote = None;
     for character in value.chars() {
         match (quote, character) {
-            (None, '\'' | '"') => quote = Some(character),
-            (Some(active), character) if active == character => quote = None,
+            (None, '\'' | '"') => {
+                quote = Some(character);
+                current.push(character);
+            }
+            (Some(active), character) if active == character => {
+                quote = None;
+                current.push(character);
+            }
             (None, character) if character == delimiter => {
                 parts.push(current.trim().to_owned());
                 current.clear();
@@ -1245,13 +1251,16 @@ fn tokenize(segment: &str) -> Result<Vec<String>, String> {
     let mut current = String::new();
     let mut quote = None;
     let mut escaped = false;
+    let mut brace_expansion_allowed = true;
     let mut characters = segment.chars().peekable();
     while let Some(character) = characters.next() {
         if escaped {
             current.push(character);
             escaped = false;
+            brace_expansion_allowed = false;
         } else if character == '\\' && quote != Some('\'') {
             escaped = true;
+            brace_expansion_allowed = false;
         } else if let Some(active) = quote {
             if character == active {
                 quote = None;
@@ -1260,15 +1269,20 @@ fn tokenize(segment: &str) -> Result<Vec<String>, String> {
             }
         } else {
             match character {
-                '\'' | '"' => quote = Some(character),
+                '\'' | '"' => {
+                    quote = Some(character);
+                    brace_expansion_allowed = false;
+                }
                 ' ' | '\t' | '\r' | '\n' => {
                     if !current.is_empty() {
-                        tokens.push(std::mem::take(&mut current));
+                        push_expanded_token(&mut tokens, &mut current, brace_expansion_allowed);
+                        brace_expansion_allowed = true;
                     }
                 }
                 '>' | '<' => {
                     if !current.is_empty() {
-                        tokens.push(std::mem::take(&mut current));
+                        push_expanded_token(&mut tokens, &mut current, brace_expansion_allowed);
+                        brace_expansion_allowed = true;
                     }
                     if character == '>' && characters.peek() == Some(&'>') {
                         characters.next();
@@ -1285,9 +1299,93 @@ fn tokenize(segment: &str) -> Result<Vec<String>, String> {
         return Err("learn: unterminated quote or escape".to_owned());
     }
     if !current.is_empty() {
-        tokens.push(current);
+        push_expanded_token(&mut tokens, &mut current, brace_expansion_allowed);
     }
     Ok(tokens)
+}
+
+fn push_expanded_token(tokens: &mut Vec<String>, token: &mut String, allowed: bool) {
+    if allowed {
+        let value = std::mem::take(token);
+        tokens.extend(expand_braces(&value));
+    } else {
+        tokens.push(std::mem::take(token));
+    }
+}
+
+fn expand_braces(value: &str) -> Vec<String> {
+    let Some((start, end, body)) = first_brace_expression(value) else {
+        return vec![value.to_owned()];
+    };
+    let alternatives = if body.contains("..") {
+        brace_range(body)
+    } else {
+        body.split(',')
+            .filter(|part| !part.is_empty())
+            .map(str::to_owned)
+            .collect()
+    };
+    if alternatives.is_empty() {
+        return vec![value.to_owned()];
+    }
+    alternatives
+        .into_iter()
+        .flat_map(|alternative| {
+            let prefix = &value[..start];
+            let suffix = &value[end + 1..];
+            expand_braces(&format!("{prefix}{alternative}{suffix}"))
+        })
+        .collect()
+}
+
+fn first_brace_expression(value: &str) -> Option<(usize, usize, &str)> {
+    let start = value.find('{')?;
+    let end = value[start + 1..].find('}')? + start + 1;
+    Some((start, end, &value[start + 1..end]))
+}
+
+fn brace_range(body: &str) -> Vec<String> {
+    let parts = body.split("..").collect::<Vec<_>>();
+    if !(2..=3).contains(&parts.len()) {
+        return Vec::new();
+    }
+    let Ok(start) = parts[0].parse::<i64>() else {
+        return Vec::new();
+    };
+    let Ok(end) = parts[1].parse::<i64>() else {
+        return Vec::new();
+    };
+    let default_step = if start <= end { 1 } else { -1 };
+    let step = parts
+        .get(2)
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(default_step);
+    if step == 0 || (start < end && step < 0) || (start > end && step > 0) {
+        return Vec::new();
+    }
+    let width = parts[0]
+        .trim_start_matches('-')
+        .len()
+        .max(parts[1].trim_start_matches('-').len());
+    let mut values = Vec::new();
+    let mut value = start;
+    while (step > 0 && value <= end) || (step < 0 && value >= end) {
+        let rendered = if width > 1 {
+            let sign = if value < 0 { "-" } else { "" };
+            format!("{sign}{:0width$}", value.unsigned_abs(), width = width)
+        } else {
+            value.to_string()
+        };
+        values.push(rendered);
+        if values.len() >= 4096 {
+            break;
+        }
+        value = value.saturating_add(step);
+        if value == i64::MAX || value == i64::MIN {
+            break;
+        }
+    }
+    values
 }
 
 type ParsedSegment = (Vec<String>, Option<String>, Option<(String, bool)>);
@@ -1481,8 +1579,8 @@ mod tests {
             .expect("session output is readable");
         assert_eq!(output.matches("LINUX SHELL DOJO").count(), 1);
         assert!(output.contains("embedded-posix"));
-        assert!(output.contains("╭─ learner@learn  ~  ◈"));
-        assert!(output.contains("╰─❯ "));
+        assert!(output.contains("learner@learn  ~  ◈"));
+        assert!(output.contains("\r\n❯ "));
     }
 
     #[test]
@@ -1506,6 +1604,32 @@ mod tests {
     }
 
     #[test]
+    fn brace_ranges_expand_before_mkdir() {
+        let mut shell = VirtualShell::new(EnvironmentSpec::default());
+        assert_eq!(shell.execute_line("mkdir folder_{0..3}").status, 0);
+        assert_eq!(shell.execute_line("mkdir {1..3}").status, 0);
+
+        for name in [
+            "folder_0", "folder_1", "folder_2", "folder_3", "1", "2", "3",
+        ] {
+            assert!(shell.fs.contains_key(&format!("/home/learner/{name}")));
+        }
+        assert!(!shell.fs.contains_key("/home/learner/folder_{0..3}"));
+        assert!(!shell.fs.contains_key("/home/learner/{1..3}"));
+    }
+
+    #[test]
+    fn quoted_or_escaped_braces_stay_literal() {
+        let mut shell = VirtualShell::new(EnvironmentSpec::default());
+        assert_eq!(shell.execute_line("mkdir '{1..3}'").status, 0);
+        assert_eq!(shell.execute_line(r"mkdir \{4..6\}").status, 0);
+
+        assert!(shell.fs.contains_key("/home/learner/{1..3}"));
+        assert!(shell.fs.contains_key("/home/learner/{4..6}"));
+        assert!(!shell.fs.contains_key("/home/learner/1"));
+    }
+
+    #[test]
     fn multi_match_completion_starts_a_fresh_prompt_line() {
         let mut session = session(&[]);
         let mut reader = session.take_reader().expect("reader is available");
@@ -1514,7 +1638,7 @@ mod tests {
         reader
             .read_to_string(&mut output)
             .expect("session output is readable");
-        assert_eq!(output.matches("╭─ learner@learn").count(), 2);
+        assert_eq!(output.matches("learner@learn").count(), 2);
         assert!(output.contains("cat"));
     }
 

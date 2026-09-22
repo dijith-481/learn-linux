@@ -1,7 +1,7 @@
 {
   "name": "learn-linux-web",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vp dev",
@@ -13,11 +13,11 @@
     "solid-js": "^1.9.15"
   },
   "devDependencies": {
+    "typescript": "^5.9.3",
     "vite": "catalog:",
     "vite-plugin-solid": "^2.11.0",
-    "typescript": "^5.9.3",
-    "vitest": "catalog:",
-    "vite-plus": "catalog:"
+    "vite-plus": "catalog:",
+    "vitest": "catalog:"
   },
   "devEngines": {
     "packageManager": {

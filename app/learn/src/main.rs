@@ -107,11 +107,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Daemon => {
             let daemon = Daemon::load(root.join("content/challenges"))?;
-            println!(
-                "learn daemon listening on {}",
-                learn_daemon::socket_path().display()
-            );
-            daemon.serve(learn_daemon::socket_path()).await?;
+            let socket = learn_daemon::socket_path();
+            let web_address = learn_daemon::websocket_address();
+            println!("learn daemon listening on {}", socket.display());
+            println!("learn web bridge listening on ws://{web_address}/ws");
+            tokio::try_join!(daemon.serve(socket), daemon.serve_websocket(web_address))?;
         }
         Command::Shell { challenge_id } => {
             let daemon = Daemon::load(root.join("content/challenges"))?;

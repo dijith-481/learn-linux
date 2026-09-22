@@ -18,35 +18,35 @@ vp build
 ```
 
 The browser attempts `ws://127.0.0.1:8787/ws` (override with
-`VITE_LEARN_BACKEND_URL`). If no bridge is running, the UI switches to a
-deterministic renderer preview so the interaction and visual layer can still
-be exercised. Preview data is never used by the Rust TUI or daemon.
+`VITE_LEARN_BACKEND_URL`). Start `learn daemon` in a second terminal; it now
+serves both the existing Unix socket and this loopback WebSocket bridge. If no
+bridge is running, the UI switches to a deterministic renderer preview so the
+interaction layer can still be exercised. Preview data is never used by the
+Rust TUI or daemon.
 
 ## Bridge contract gap
 
-The current Rust daemon serves protobuf frames over a Unix socket only
-(`learn-protocol` + `Daemon::serve`). Browsers cannot open that socket, and
-the repository does not currently contain an HTTP/WebSocket transport. A
-future bridge should translate the existing messages as follows:
+The bridge is intentionally small and loopback-only. It keeps the Rust
+daemon's protobuf/Unix-socket contract private and translates the same typed
+handlers for browser use:
 
-| WebSocket JSON | Existing daemon request/event |
-| --- | --- |
-| `hello` | `HelloRequest` → `HelloResponse` plus initial `BackendSnapshot` |
-| `open_session` | `OpenSessionRequest` → `ChallengeResponse` |
-| `terminal_input` | `TerminalInput` |
-| `terminal_resize` | `TerminalResize` |
-| `close_session` | `CloseSession` |
-| `reset` | `ResetRequest` |
-| `search_docs` | `SearchDocsRequest` → `DocsResponse` |
-| `terminal_output` event | `TerminalOutput` event, UTF-8 decoded for the browser |
-| `challenge_state` event | `ChallengeStateEvent` |
+| WebSocket JSON          | Existing daemon request/event                                   |
+| ----------------------- | --------------------------------------------------------------- |
+| `hello`                 | `HelloRequest` → `HelloResponse` plus initial `BackendSnapshot` |
+| `open_session`          | `OpenSessionRequest` → `ChallengeResponse`                      |
+| `terminal_input`        | `TerminalInput`                                                 |
+| `terminal_resize`       | `TerminalResize`                                                |
+| `close_session`         | `CloseSession`                                                  |
+| `reset`                 | `ResetRequest`                                                  |
+| `search_docs`           | `SearchDocsRequest` → `DocsResponse`                            |
+| `terminal_output` event | `TerminalOutput` event, UTF-8 decoded for the browser           |
+| `challenge_state` event | `ChallengeStateEvent`                                           |
 
 Each request carries a numeric `requestId` and receives `{ type: "response",
-requestId, ok, ... }`. The bridge must preserve the daemon's session lifetime
-and forward events only to the owning WebSocket connection. It should also
-return the initial snapshot from `StatusRequest`, the compiled challenge
-metadata, and persisted progress so the browser never reconstructs verifier
-state.
+requestId, ok, ... }`. The bridge preserves the daemon's session lifetime and
+forwards events only to the owning WebSocket connection. The initial hello
+response includes compiled challenge metadata and persisted progress so the
+browser never reconstructs verifier state.
 
 ## Verification note
 

@@ -3,6 +3,7 @@
 
 //! Offline command documentation with deterministic fuzzy ranking.
 
+use frizbee::{Config, Matcher, Pattern};
 use serde::{Deserialize, Serialize};
 
 /// One searchable documentation chunk.
@@ -41,17 +42,23 @@ impl DocsIndex {
         Self { documents }
     }
 
-    /// Search documents using token-aware subsequence matching.
+    /// Search documents using exact, phrase, and typo-resistant fuzzy matching.
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResult> {
         let normalized_query = normalize(query);
         if normalized_query.is_empty() {
             return Vec::new();
         }
+        let fuzzy_scores = fuzzy_document_scores(&self.documents, &normalized_query);
         let mut results = self
             .documents
             .iter()
-            .filter_map(|document| {
-                let score = score_document(document, &normalized_query)?;
+            .enumerate()
+            .filter_map(|(document_index, document)| {
+                let score = score_document(
+                    document,
+                    &normalized_query,
+                    fuzzy_scores.get(document_index).copied().flatten(),
+                )?;
                 Some(SearchResult {
                     snippet: snippet(&document.body),
                     document: document.clone(),
@@ -79,7 +86,7 @@ impl DocsIndex {
     }
 }
 
-fn score_document(document: &Document, query: &str) -> Option<u32> {
+fn score_document(document: &Document, query: &str, fuzzy_score: Option<u32>) -> Option<u32> {
     let title = normalize(&document.title);
     let body = normalize(&document.body);
     let aliases = document
@@ -88,6 +95,9 @@ fn score_document(document: &Document, query: &str) -> Option<u32> {
         .map(|value| normalize(value))
         .collect::<Vec<_>>();
     if title == query {
+        return Some(0);
+    }
+    if title.split_whitespace().next() == Some(query) {
         return Some(0);
     }
     if aliases.iter().any(|alias| alias == query) {
@@ -104,35 +114,191 @@ fn score_document(document: &Document, query: &str) -> Option<u32> {
     if body.contains(query) {
         return Some(20);
     }
-    let candidates = std::iter::once(title)
-        .chain(aliases)
-        .chain(std::iter::once(body));
-    let distance = candidates
-        .map(|candidate| edit_distance(query, &candidate))
-        .min()?;
-    let query_length = u32::try_from(query.chars().count()).unwrap_or(u32::MAX);
-    let threshold = 3.max(query_length / 4);
-    (distance <= threshold).then_some(40 + distance)
+    fuzzy_score.map(|score| 1_000_000u32.saturating_add(score))
 }
 
-fn edit_distance(left: &str, right: &str) -> u32 {
-    let right = right.chars().collect::<Vec<_>>();
-    let mut previous = (0..=right.len())
-        .map(|value| u32::try_from(value).unwrap_or(u32::MAX))
+#[derive(Clone, Debug)]
+struct SearchField {
+    document_index: usize,
+    /// Lower values make a fuzzy match more relevant.
+    field_penalty: u32,
+    text: String,
+}
+
+fn fuzzy_document_scores(documents: &[Document], query: &str) -> Vec<Option<u32>> {
+    let fields = documents
+        .iter()
+        .enumerate()
+        .flat_map(|(document_index, document)| {
+            let title = std::iter::once(SearchField {
+                document_index,
+                field_penalty: 32,
+                text: normalize(&document.title),
+            });
+            let aliases = document.aliases.iter().map(move |alias| SearchField {
+                document_index,
+                field_penalty: 0,
+                text: normalize(alias),
+            });
+            let body = std::iter::once(SearchField {
+                document_index,
+                field_penalty: 64,
+                text: normalize(&document.body),
+            });
+            title.chain(aliases).chain(body)
+        })
         .collect::<Vec<_>>();
-    for (left_index, left_character) in left.chars().enumerate() {
-        let left_index = u32::try_from(left_index).unwrap_or(u32::MAX);
-        let mut current = vec![left_index.saturating_add(1)];
-        for (right_index, right_character) in right.iter().enumerate() {
-            let substitution =
-                previous[right_index] + u32::from(left_character != *right_character);
-            let insertion = current[right_index] + 1;
-            let deletion = previous[right_index + 1] + 1;
-            current.push(substitution.min(insertion).min(deletion));
+    let haystacks = fields
+        .iter()
+        .map(|field| field.text.as_str())
+        .collect::<Vec<_>>();
+    let config = Config::default().max_typos(Some(typo_budget(query.chars().count())));
+    let mut scores = vec![None; documents.len()];
+
+    if query.split_whitespace().count() == 1 {
+        let mut phrase_matcher = Matcher::new(query, &config);
+        for matched in phrase_matcher.match_list(&haystacks) {
+            update_fuzzy_score(&mut scores, &fields, matched.index, matched.score, 0, 0);
         }
-        previous = current;
     }
-    previous[right.len()]
+
+    // A natural-language query should still work when its words are reordered.
+    // Frizbee's multi-pattern matcher requires every word to match the same
+    // field, while retaining Frizbee's typo tolerance for each word.
+    let patterns = Pattern::parse_query(query)
+        .into_iter()
+        .map(|pattern| {
+            let budget = typo_budget(pattern.needle.chars().count());
+            pattern.max_typos(Some(budget))
+        })
+        .collect::<Vec<_>>();
+    if patterns.len() > 1 {
+        let mut token_matcher = Matcher::from_patterns(&patterns, &config);
+        for matched in token_matcher.match_list(&haystacks) {
+            let Some(field) = fields.get(matched.index as usize) else {
+                continue;
+            };
+            update_fuzzy_score(
+                &mut scores,
+                &fields,
+                matched.index,
+                matched.score,
+                256,
+                word_shape_penalty(query, &field.text),
+            );
+        }
+    }
+    update_document_token_scores(&mut scores, &fields, &haystacks, query);
+    scores
+}
+
+fn update_document_token_scores(
+    scores: &mut [Option<u32>],
+    fields: &[SearchField],
+    haystacks: &[&str],
+    query: &str,
+) {
+    let tokens = query
+        .split_whitespace()
+        .filter(|token| token.chars().count() >= 2)
+        .collect::<Vec<_>>();
+    if tokens.len() < 2 {
+        return;
+    }
+
+    let mut totals = vec![0u32; scores.len()];
+    let mut matched_tokens = vec![0usize; scores.len()];
+    for token in tokens {
+        let config = Config::default().max_typos(Some(typo_budget(token.chars().count())));
+        let mut matcher = Matcher::new(token, &config);
+        let mut best_for_document = vec![None; scores.len()];
+        for matched in matcher.match_list(haystacks) {
+            let Some(field) = fields.get(matched.index as usize) else {
+                continue;
+            };
+            let score = u32::from(u16::MAX)
+                .saturating_sub(u32::from(matched.score))
+                .saturating_add(field.field_penalty)
+                .saturating_add(word_shape_penalty(token, &field.text));
+            let document_score = &mut best_for_document[field.document_index];
+            if document_score.is_none_or(|current| score < current) {
+                *document_score = Some(score);
+            }
+        }
+        for (document_index, best_score) in best_for_document.into_iter().enumerate() {
+            if let Some(best_score) = best_score {
+                totals[document_index] = totals[document_index].saturating_add(best_score);
+                matched_tokens[document_index] += 1;
+            }
+        }
+    }
+
+    let required_tokens = query
+        .split_whitespace()
+        .filter(|token| token.chars().count() >= 2)
+        .count();
+    for (document_index, total) in totals.into_iter().enumerate() {
+        if matched_tokens[document_index] != required_tokens {
+            continue;
+        }
+        let average = total / u32::try_from(required_tokens).unwrap_or(1);
+        let score = 1_000_000u32.saturating_add(average).saturating_add(128);
+        if scores[document_index].is_none_or(|current| score < current) {
+            scores[document_index] = Some(score);
+        }
+    }
+}
+
+fn update_fuzzy_score(
+    scores: &mut [Option<u32>],
+    fields: &[SearchField],
+    field_index: u32,
+    match_score: u16,
+    match_penalty: u32,
+    shape_penalty: u32,
+) {
+    let Some(field) = fields.get(field_index as usize) else {
+        return;
+    };
+    let score = u32::from(u16::MAX)
+        .saturating_sub(u32::from(match_score))
+        .saturating_add(field.field_penalty)
+        .saturating_add(match_penalty)
+        .saturating_add(shape_penalty);
+    let document_score = &mut scores[field.document_index];
+    if document_score.is_none_or(|current| score < current) {
+        *document_score = Some(score);
+    }
+}
+
+fn word_shape_penalty(query: &str, candidate: &str) -> u32 {
+    let candidate_words = candidate.split_whitespace().collect::<Vec<_>>();
+    query
+        .split_whitespace()
+        .map(|query_word| {
+            candidate_words
+                .iter()
+                .map(|candidate_word| {
+                    query_word
+                        .chars()
+                        .count()
+                        .abs_diff(candidate_word.chars().count())
+                })
+                .min()
+                .unwrap_or(8)
+        })
+        .sum::<usize>()
+        .saturating_mul(8)
+        .try_into()
+        .unwrap_or(u32::MAX)
+}
+
+fn typo_budget(character_count: usize) -> u16 {
+    match character_count {
+        0..=2 => 0,
+        3..=4 => 1,
+        _ => u16::try_from((character_count / 4).clamp(1, 6)).unwrap_or(6),
+    }
 }
 
 fn normalize(value: &str) -> String {
@@ -141,6 +307,8 @@ fn normalize(value: &str) -> String {
         .map(|character| {
             if character.is_ascii_alphanumeric() {
                 character.to_ascii_lowercase()
+            } else if matches!(character, '>' | '|' | '*' | '<') {
+                character
             } else {
                 ' '
             }
@@ -427,5 +595,29 @@ mod tests {
             index.search("save output", 1)[0].document.id,
             "shell.redirect"
         );
+        assert_eq!(index.search(">", 1)[0].document.id, "shell.redirect");
+        assert_eq!(index.search("|", 1)[0].document.id, "shell.pipe");
+        assert_eq!(index.search("*", 1)[0].document.id, "shell.glob");
+    }
+
+    #[test]
+    fn fuzzy_search_handles_typos_and_reordered_words() {
+        let index = starter_index();
+        let cases = [
+            ("creat a fle", "command.touch"),
+            ("mk a foler", "command.mkdir"),
+            ("read contnts", "command.cat"),
+            ("text search fiel", "command.grep"),
+            ("locate treasur", "command.find"),
+            ("save commnd otput", "shell.redirect"),
+        ];
+
+        for (query, expected_id) in cases {
+            assert_eq!(
+                index.search(query, 1)[0].document.id,
+                expected_id,
+                "query {query:?}"
+            );
+        }
     }
 }

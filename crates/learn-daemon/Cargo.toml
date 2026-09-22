@@ -6,6 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+base64.workspace = true
 learn-challenge = { path = "../learn-challenge" }
 learn-core = { path = "../learn-core" }
 learn-docs = { path = "../learn-docs" }

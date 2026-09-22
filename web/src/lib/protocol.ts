@@ -90,7 +90,7 @@ type WireEvent = {
 };
 
 /**
- * Browser-side adapter for the future HTTP/WebSocket bridge.
+ * Browser-side adapter for the loopback WebSocket bridge served by `learn daemon`.
  *
  * The bridge keeps the Rust daemon's protobuf/Unix-socket contract private;
  * this JSON shape is intentionally one-to-one with the existing request and
@@ -101,10 +101,13 @@ export class WebSocketBackend implements LearnBackend {
   private socket?: WebSocket;
   private nextRequestId = 1;
   private snapshot?: BackendSnapshot;
-  private readonly pending = new Map<number, {
-    resolve: (response: WireResponse) => void;
-    reject: (error: Error) => void;
-  }>();
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (response: WireResponse) => void;
+      reject: (error: Error) => void;
+    }
+  >();
   private readonly listeners = new Set<(event: BackendEvent) => void>();
 
   constructor(private readonly url = "ws://127.0.0.1:8787/ws") {}
@@ -116,7 +119,11 @@ export class WebSocketBackend implements LearnBackend {
       const socket = this.socket;
       if (!socket) return reject(new Error("WebSocket was not created"));
       socket.addEventListener("open", () => resolve(), { once: true });
-      socket.addEventListener("error", () => reject(new Error(`Unable to connect to ${this.url}`)), { once: true });
+      socket.addEventListener(
+        "error",
+        () => reject(new Error(`Unable to connect to ${this.url}`)),
+        { once: true },
+      );
     });
     const response = await this.request({ type: "hello", clientKind: "web" });
     this.snapshot = response.snapshot as BackendSnapshot;
@@ -185,7 +192,7 @@ export class WebSocketBackend implements LearnBackend {
       const event: BackendEvent = {
         type: "terminal_output",
         sessionId: String(message.sessionId),
-        data: String(message.data ?? ""),
+        data: typeof message.data === "string" ? message.data : "",
       };
       this.listeners.forEach((listener) => listener(event));
     } else if (message.type === "challenge_state") {
@@ -214,12 +221,66 @@ export class DemoBackend implements LearnBackend {
       completedCount: 3,
     },
     challenges: [
-      { id: "foundation.orientation", title: "Find your bearings", objective: "Print the working directory and list the files around you.", track: "FOUNDATIONS", lesson: "01 / 10", state: "in_progress", attempts: 2, hintCount: 1 },
-      { id: "foundation.files", title: "Read the room", objective: "Inspect a file without changing it.", track: "FOUNDATIONS", lesson: "02 / 10", state: "available", attempts: 0, hintCount: 0 },
-      { id: "foundation.paths", title: "Paths are a language", objective: "Move through a nested directory using an absolute path.", track: "FOUNDATIONS", lesson: "03 / 10", state: "available", attempts: 0, hintCount: 0 },
-      { id: "shell.pipes", title: "Pass the stream", objective: "Connect two small commands with a pipe.", track: "SHELL CRAFT", lesson: "04 / 10", state: "completed", attempts: 1, hintCount: 0 },
-      { id: "shell.grep", title: "Search with intent", objective: "Find one exact line in a file with grep.", track: "SHELL CRAFT", lesson: "05 / 10", state: "completed", attempts: 1, hintCount: 0 },
-      { id: "shell.redirect", title: "Leave a trace", objective: "Redirect command output into a new file.", track: "SHELL CRAFT", lesson: "06 / 10", state: "available", attempts: 0, hintCount: 0 },
+      {
+        id: "foundation.orientation",
+        title: "Find your bearings",
+        objective: "Print the working directory and list the files around you.",
+        track: "FOUNDATIONS",
+        lesson: "01 / 10",
+        state: "in_progress",
+        attempts: 2,
+        hintCount: 1,
+      },
+      {
+        id: "foundation.files",
+        title: "Read the room",
+        objective: "Inspect a file without changing it.",
+        track: "FOUNDATIONS",
+        lesson: "02 / 10",
+        state: "available",
+        attempts: 0,
+        hintCount: 0,
+      },
+      {
+        id: "foundation.paths",
+        title: "Paths are a language",
+        objective: "Move through a nested directory using an absolute path.",
+        track: "FOUNDATIONS",
+        lesson: "03 / 10",
+        state: "available",
+        attempts: 0,
+        hintCount: 0,
+      },
+      {
+        id: "shell.pipes",
+        title: "Pass the stream",
+        objective: "Connect two small commands with a pipe.",
+        track: "SHELL CRAFT",
+        lesson: "04 / 10",
+        state: "completed",
+        attempts: 1,
+        hintCount: 0,
+      },
+      {
+        id: "shell.grep",
+        title: "Search with intent",
+        objective: "Find one exact line in a file with grep.",
+        track: "SHELL CRAFT",
+        lesson: "05 / 10",
+        state: "completed",
+        attempts: 1,
+        hintCount: 0,
+      },
+      {
+        id: "shell.redirect",
+        title: "Leave a trace",
+        objective: "Redirect command output into a new file.",
+        track: "SHELL CRAFT",
+        lesson: "06 / 10",
+        state: "available",
+        attempts: 0,
+        hintCount: 0,
+      },
     ],
     progress: [
       { challengeId: "foundation.orientation", state: "in_progress", attempts: 2, hintsUsed: 1 },
@@ -233,19 +294,42 @@ export class DemoBackend implements LearnBackend {
   }
 
   async openSession(challengeId: string, _columns = 100, _rows = 32): Promise<SessionInfo> {
-    const challenge = this.data.challenges.find((item) => item.id === challengeId) ?? this.data.challenges[0];
+    const challenge =
+      this.data.challenges.find((item) => item.id === challengeId) ?? this.data.challenges[0];
     this.sessionId = `demo-${challenge.id}`;
-    queueMicrotask(() => this.emit({ type: "terminal_output", sessionId: this.sessionId, data: "Learn Linux sandbox · session ready\r\n$ " }));
-    return { id: this.sessionId, challengeId: challenge.id, title: challenge.title, objective: challenge.objective };
+    queueMicrotask(() =>
+      this.emit({
+        type: "terminal_output",
+        sessionId: this.sessionId,
+        data: "Learn Linux sandbox · session ready\r\n$ ",
+      }),
+    );
+    return {
+      id: this.sessionId,
+      challengeId: challenge.id,
+      title: challenge.title,
+      objective: challenge.objective,
+    };
   }
 
   async sendTerminalInput(sessionId: string, data: string): Promise<void> {
     const command = data.replace(/\r?\n/g, "").trim();
     queueMicrotask(() => {
       this.emit({ type: "terminal_output", sessionId, data: `${command}\r\n` });
-      if (command === "pwd") this.emit({ type: "terminal_output", sessionId, data: "/home/learner\r\n$ " });
-      else if (command === "ls") this.emit({ type: "terminal_output", sessionId, data: "notes.txt  projects  welcome.txt\r\n$ " });
-      else this.emit({ type: "terminal_output", sessionId, data: `bash: ${command || ""}: demo shell hint — try pwd or ls\r\n$ ` });
+      if (command === "pwd")
+        this.emit({ type: "terminal_output", sessionId, data: "/home/learner\r\n$ " });
+      else if (command === "ls")
+        this.emit({
+          type: "terminal_output",
+          sessionId,
+          data: "notes.txt  projects  welcome.txt\r\n$ ",
+        });
+      else
+        this.emit({
+          type: "terminal_output",
+          sessionId,
+          data: `bash: ${command || ""}: demo shell hint — try pwd or ls\r\n$ `,
+        });
     });
   }
 
@@ -253,7 +337,13 @@ export class DemoBackend implements LearnBackend {
   async closeSession(): Promise<void> {}
   async resetChallenge(): Promise<void> {}
   async searchDocs(query: string): Promise<DocResult[]> {
-    return [{ id: "command.pwd", title: "pwd — print working directory", snippet: `Use pwd to answer “where am I?”${query ? ` · matched “${query}”` : ""}` }];
+    return [
+      {
+        id: "command.pwd",
+        title: "pwd — print working directory",
+        snippet: `Use pwd to answer “where am I?”${query ? ` · matched “${query}”` : ""}`,
+      },
+    ];
   }
   subscribe(listener: (event: BackendEvent) => void): () => void {
     this.listeners.add(listener);

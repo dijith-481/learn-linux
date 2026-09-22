@@ -15,6 +15,7 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use frizbee::{Config, Matcher};
 use learn_daemon::{ClientError, Daemon, DaemonClient};
 use learn_protocol::{Envelope, envelope, event as protocol_event};
 use learn_runtime::{RuntimeError, start_wasm_session};
@@ -29,8 +30,10 @@ use ratatui::{
 use tachyonfx::{EffectManager, Interpolation, fx};
 use thiserror::Error;
 
+mod terminal_image;
 mod theme;
 mod vim_dojo;
+use terminal_image::CatAnimation;
 use theme::{Theme, ThemeId};
 use vim_dojo::VimDojo;
 
@@ -151,7 +154,8 @@ fn palette_matches(query: &str) -> Vec<usize> {
         .enumerate()
         .filter_map(|(index, entry)| palette_match_score(&query, entry).map(|score| (score, index)))
         .collect::<Vec<_>>();
-    if let Some(best) = matches.iter().map(|(score, _)| *score).min() {
+    matches.sort_by_key(|(score, index)| (*score, *index));
+    if let Some((best, _)) = matches.first().copied() {
         matches.retain(|(score, _)| *score == best);
     }
     matches.into_iter().map(|(_, index)| index).collect()
@@ -161,6 +165,26 @@ fn palette_match_score(query: &str, entry: &PaletteEntry) -> Option<usize> {
     if query.is_empty() {
         return Some(usize::MAX);
     }
+    if let Some(score) = palette_literal_match_score(query, entry) {
+        return Some(score);
+    }
+    let transposed_score = adjacent_transpositions(query)
+        .into_iter()
+        .filter_map(|variant| palette_literal_match_score(&variant, entry))
+        .map(|score| score.saturating_add(4))
+        .min();
+    if transposed_score.is_some() {
+        return transposed_score;
+    }
+
+    let haystack = format!("{} {}", entry.label, entry.keywords).to_ascii_lowercase();
+    let config = Config::default().max_typos(Some(palette_typo_budget(query.chars().count())));
+    let mut matcher = Matcher::new(query, &config);
+    let fuzzy_match = matcher.match_list(&[haystack]).into_iter().next()?;
+    Some(1_000usize.saturating_add(usize::from(u16::MAX.saturating_sub(fuzzy_match.score))))
+}
+
+fn palette_literal_match_score(query: &str, entry: &PaletteEntry) -> Option<usize> {
     let label_words = entry.label.split_whitespace().collect::<Vec<_>>();
     let keyword_words = entry.keywords.split_whitespace().collect::<Vec<_>>();
     if label_words
@@ -182,7 +206,29 @@ fn palette_match_score(query: &str, entry: &PaletteEntry) -> Option<usize> {
         return Some(2);
     }
     let haystack = format!("{} {}", entry.label, entry.keywords).to_ascii_lowercase();
-    haystack.contains(query).then_some(3)
+    if haystack.contains(query) {
+        return Some(3);
+    }
+    None
+}
+
+fn adjacent_transpositions(query: &str) -> Vec<String> {
+    let characters = query.chars().collect::<Vec<_>>();
+    (0..characters.len().saturating_sub(1))
+        .map(|index| {
+            let mut transposed = characters.clone();
+            transposed.swap(index, index + 1);
+            transposed.into_iter().collect()
+        })
+        .collect()
+}
+
+fn palette_typo_budget(character_count: usize) -> u16 {
+    match character_count {
+        0..=2 => 0,
+        3..=4 => 1,
+        _ => u16::try_from((character_count / 4).clamp(1, 4)).unwrap_or(4),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,69 +240,73 @@ enum PanelFocus {
 #[derive(Debug, Clone, Copy)]
 struct PetState {
     x: i16,
-    y: i16,
     dx: i16,
-    dy: i16,
     step_elapsed: Duration,
     mood: u8,
+    facing_right: bool,
 }
 
 const PET_WIDTH: u16 = 16;
-const PET_HEIGHT: u16 = 7;
+const PET_HEIGHT: u16 = 9;
+const PET_STEP: Duration = Duration::from_millis(850);
 
 impl Default for PetState {
     fn default() -> Self {
         Self {
             x: 8,
-            y: 5,
             dx: 1,
-            dy: 0,
             step_elapsed: Duration::ZERO,
             mood: 0,
+            facing_right: true,
         }
     }
 }
 
 impl PetState {
-    fn tick(&mut self, elapsed: Duration, width: u16, height: u16) {
+    fn tick(&mut self, elapsed: Duration, width: u16) {
         self.step_elapsed += elapsed;
-        if self.step_elapsed < Duration::from_millis(850) {
+        if self.step_elapsed < PET_STEP {
             return;
         }
         self.step_elapsed = Duration::ZERO;
         self.mood = self.mood.wrapping_add(1);
+        let max_x = i16::try_from(width.saturating_sub(PET_WIDTH)).unwrap_or(i16::MAX);
+        self.x = self.x.clamp(0, max_x.max(0));
         // A cat pauses between steps instead of gliding like a screensaver.
         if self.mood % 4 == 0 {
             return;
         }
-        let max_x = i16::try_from(width.saturating_sub(PET_WIDTH)).unwrap_or(i16::MAX);
-        let max_y = i16::try_from(height.saturating_sub(PET_HEIGHT)).unwrap_or(i16::MAX);
-        self.x = self.x.clamp(0, max_x.max(0));
-        self.y = self.y.clamp(0, max_y.max(0));
+        // The pet is a quiet bottom-edge companion, never an obstruction over lesson text.
         self.x = self.x.saturating_add(self.dx);
-        self.y = self.y.saturating_add(self.dy);
+        self.x = self.x.clamp(0, max_x.max(0));
+        if self.dx != 0 {
+            self.facing_right = self.dx > 0;
+        }
         if self.x <= 0 || self.x >= max_x {
             self.dx = -self.dx;
-        }
-        if self.y <= 0 || self.y >= max_y {
-            self.dy = -self.dy;
-        }
-        if self.mood % 8 == 0 && self.dx != 0 {
-            self.dy = i16::from(self.dy == 0);
         }
     }
 
     fn handle_key(&mut self, code: KeyCode) -> bool {
-        let (dx, dy) = match code {
-            KeyCode::Left => (-1, 0),
-            KeyCode::Right => (1, 0),
-            KeyCode::Up => (0, -1),
-            KeyCode::Down => (0, 1),
+        let dx = match code {
+            KeyCode::Left => -1,
+            KeyCode::Right => 1,
             _ => return false,
         };
         self.dx = dx;
-        self.dy = dy;
+        self.facing_right = dx > 0;
         true
+    }
+
+    fn animation_frame(&self, frame_count: usize) -> usize {
+        if frame_count == 0 {
+            return 0;
+        }
+        let count = u128::try_from(frame_count).unwrap_or(1);
+        let index = self.step_elapsed.as_millis().saturating_mul(count) / PET_STEP.as_millis();
+        usize::try_from(index)
+            .unwrap_or(0)
+            .min(frame_count.saturating_sub(1))
     }
 }
 
@@ -353,22 +403,27 @@ async fn app_loop(
     let mut last_frame = Instant::now();
     let mut animation_time = Duration::ZERO;
     let mut completed = false;
-    let mut completion_elapsed = Duration::ZERO;
     let mut score = 0_usize;
     let mut hint_level = 0_usize;
     let mut shell_input = String::new();
+    let mut terminal_history = Vec::new();
+    let mut course_complete = false;
     let mut animations_enabled = true;
     let mut mode = AppMode::Start;
     let mut start_transition = None;
     let mut focus = PanelFocus::Left;
     // The pet is an optional atmosphere feature; keep the default lesson
     // focused and let learners enable it from the command palette.
+    let mut theme_id = ThemeId::Default;
     let mut pet_enabled = false;
     let mut pet = PetState::default();
+    let mut cat_animation = CatAnimation::load(
+        Rect::new(0, 0, PET_WIDTH, PET_HEIGHT),
+        theme_id.theme().surface,
+    )?;
     let mut rain_enabled = false;
     let mut palette_index = 0_usize;
     let mut palette_query = String::new();
-    let mut theme_id = ThemeId::Default;
     let mut vim_dojo = VimDojo::default();
     let mut docs_query = String::new();
     let mut docs_results = Vec::new();
@@ -377,9 +432,6 @@ async fn app_loop(
         let elapsed = last_frame.elapsed();
         last_frame = Instant::now();
         animation_time += elapsed;
-        if completed {
-            completion_elapsed += elapsed;
-        }
         if let Some(progress) = start_transition.as_mut() {
             *progress += elapsed;
             if *progress >= Duration::from_millis(220) {
@@ -396,7 +448,7 @@ async fn app_loop(
             vim_dojo.tick(elapsed);
         }
         if pet_enabled {
-            pet.tick(elapsed, pane_columns, pane_rows);
+            pet.tick(elapsed, pane_columns);
         }
         while let Ok(data) = output_receiver.try_recv() {
             parser.process(&data);
@@ -424,13 +476,31 @@ async fn app_loop(
                     theme_id.theme(),
                 );
                 if !was_completed && completed {
-                    completion_elapsed = Duration::ZERO;
                     score = score.saturating_add(1);
                 }
             }
         }
-        if completed && completion_elapsed >= Duration::from_secs(2) {
-            advance_to_next_challenge(
+        if completed && !course_complete {
+            append_terminal_snapshot(
+                &mut terminal_history,
+                &parser,
+                pane_columns,
+                theme_id.theme(),
+            );
+            {
+                let next_title = daemon
+                    .content
+                    .challenges
+                    .get(selected_index.saturating_add(1))
+                    .map(|challenge| challenge.spec.meta.title.as_str());
+                terminal_history.extend(completion_lines(
+                    selected_challenge.as_ref(),
+                    next_title,
+                    score,
+                    theme_id.theme(),
+                ));
+            }
+            let advanced = advance_to_next_challenge(
                 daemon,
                 &mut selected_index,
                 &mut selected_challenge,
@@ -442,9 +512,17 @@ async fn app_loop(
                 &output_sender,
                 &mut parser,
                 &mut completed,
-                &mut completion_elapsed,
             )
             .await?;
+            if advanced {
+                if let Some(challenge) = selected_challenge.as_ref() {
+                    terminal_history
+                        .extend(next_challenge_history_lines(challenge, theme_id.theme()));
+                }
+            } else {
+                course_complete = true;
+                completed = false;
+            }
             focus = PanelFocus::Left;
             hint_level = 0;
             shell_input.clear();
@@ -455,7 +533,6 @@ async fn app_loop(
             selected_challenge.as_ref(),
             selected_index,
             session.is_some() || rpc_session_id.is_some(),
-            completed,
             mode,
             start_transition,
             hint_level,
@@ -465,12 +542,12 @@ async fn app_loop(
             &docs_results,
             &progress_rows,
             &parser,
+            &terminal_history,
             focus,
             pet_enabled,
             &pet,
+            &cat_animation,
             rain_enabled,
-            completion_elapsed,
-            score,
             animation_time,
             elapsed,
             &mut effects,
@@ -575,9 +652,10 @@ async fn app_loop(
                                             if let Some(challenge) = selected_challenge.as_ref() {
                                                 daemon.reset_challenge(&challenge.spec.id)?;
                                                 completed = false;
+                                                course_complete = false;
+                                                terminal_history.clear();
                                                 hint_level = 0;
                                                 shell_input.clear();
-                                                completion_elapsed = Duration::ZERO;
                                                 if client.is_none() {
                                                     session = Some(start_wasm_session(
                                                         challenge.spec.id.as_str(),
@@ -615,6 +693,10 @@ async fn app_loop(
                                         }
                                         PaletteCommand::SetTheme(selected_theme) => {
                                             theme_id = selected_theme;
+                                            cat_animation = CatAnimation::load(
+                                                Rect::new(0, 0, PET_WIDTH, PET_HEIGHT),
+                                                theme_id.theme().surface,
+                                            )?;
                                             mode = AppMode::Lesson;
                                         }
                                         PaletteCommand::Quit => break,
@@ -695,9 +777,10 @@ async fn app_loop(
                                 selected_challenge =
                                     daemon.content.challenges.get(selected_index).cloned();
                                 completed = false;
+                                course_complete = false;
+                                terminal_history.clear();
                                 hint_level = 0;
                                 shell_input.clear();
-                                completion_elapsed = Duration::ZERO;
                                 focus = PanelFocus::Left;
                                 if let Some(client) = client.as_mut() {
                                     if let Some(session_id) = rpc_session_id.take() {
@@ -791,14 +874,7 @@ async fn app_loop(
                                         daemon.complete_challenge(&challenge.spec.id)?;
                                     }
                                     completed = true;
-                                    completion_elapsed = Duration::ZERO;
                                     score = score.saturating_add(1);
-                                    if animations_enabled {
-                                        effects.add_effect(fx::fade_from_fg(
-                                            theme_id.theme().accent,
-                                            (500, Interpolation::QuadOut),
-                                        ));
-                                    }
                                 } else if submitted_command
                                     .as_ref()
                                     .is_some_and(|command| !command.trim().is_empty())
@@ -848,18 +924,14 @@ async fn advance_to_next_challenge(
     output_sender: &mpsc::Sender<Vec<u8>>,
     parser: &mut vt100::Parser,
     completed: &mut bool,
-    completion_elapsed: &mut Duration,
-) -> Result<(), TuiError> {
+) -> Result<bool, TuiError> {
     let next_index = selected_index.saturating_add(1);
     let Some(challenge) = daemon.content.challenges.get(next_index).cloned() else {
-        *completed = false;
-        *completion_elapsed = Duration::ZERO;
-        return Ok(());
+        return Ok(false);
     };
     *selected_index = next_index;
     *selected_challenge = Some(challenge.clone());
     *completed = false;
-    *completion_elapsed = Duration::ZERO;
     if let Some(client) = client {
         if let Some(session_id) = rpc_session_id.take() {
             client.close_session(&session_id).await?;
@@ -881,7 +953,7 @@ async fn advance_to_next_challenge(
         }
     }
     *parser = vt100::Parser::new(pane_rows, pane_columns, 1_000);
-    Ok(())
+    Ok(true)
 }
 
 async fn connect_client(path: &Path) -> Result<DaemonClient, TuiError> {
@@ -1030,7 +1102,6 @@ fn draw_ui(
     selected_challenge: Option<&learn_challenge::CompiledChallenge>,
     selected_index: usize,
     session_active: bool,
-    completed: bool,
     mode: AppMode,
     start_transition: Option<Duration>,
     hint_level: usize,
@@ -1040,12 +1111,12 @@ fn draw_ui(
     docs_results: &[(String, String)],
     progress_rows: &[String],
     parser: &vt100::Parser,
+    terminal_history: &[Line<'static>],
     focus: PanelFocus,
     pet_enabled: bool,
     pet: &PetState,
+    cat_animation: &CatAnimation,
     rain_enabled: bool,
-    completion_elapsed: Duration,
-    score: usize,
     animation_time: Duration,
     elapsed: Duration,
     effects: &mut EffectManager<()>,
@@ -1056,6 +1127,12 @@ fn draw_ui(
     terminal
         .draw(|frame| {
             let area = frame.area();
+            // Repaint the whole frame so theme changes also update cells that the
+            // terminal emulator did not explicitly write this frame.
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.surface)),
+                area,
+            );
             if mode == AppMode::Start {
                 render_start_screen(
                     frame,
@@ -1089,30 +1166,26 @@ fn draw_ui(
                 .split(columns[0]);
             let brief_lines = challenge_brief_lines(selected_challenge, theme);
             let runtime_text = daemon.runtime.render();
-            let mut terminal_lines = if mode == AppMode::Vim {
+            let terminal_lines = if mode == AppMode::Vim {
                 vim_dojo.main_lines(left_sections[1].width.saturating_sub(2), theme)
-            } else if session_active {
-                let width = left_sections[1].width.saturating_sub(2);
-                terminal_lines_with_cursor(parser, width, mode == AppMode::Lesson, theme)
             } else {
-                runtime_text.lines().map(Line::from).collect::<Vec<_>>()
+                let mut lines = terminal_history.to_vec();
+                if session_active {
+                    let width = left_sections[1].width.saturating_sub(2);
+                    lines.extend(terminal_lines_with_cursor(
+                        parser,
+                        width,
+                        mode == AppMode::Lesson,
+                        theme,
+                    ));
+                } else {
+                    lines.extend(runtime_text.lines().map(Line::from));
+                }
+                lines
             };
-            if mode == AppMode::Lesson && completed {
-                let next_title = daemon
-                    .content
-                    .challenges
-                    .get(selected_index.saturating_add(1))
-                    .map(|challenge| challenge.spec.meta.title.as_str());
-                terminal_lines.extend(completion_lines(
-                    selected_challenge,
-                    next_title,
-                    completion_elapsed,
-                    score,
-                    theme,
-                ));
-            }
             let brief_block = Block::default()
                 .borders(Borders::ALL)
+                .style(Style::default().bg(theme.surface))
                 .border_style(if focus == PanelFocus::Left {
                     theme.accent()
                 } else {
@@ -1126,6 +1199,7 @@ fn draw_ui(
             frame.render_widget(brief, left_sections[0]);
             let terminal_block = Block::default()
                 .borders(Borders::ALL)
+                .style(Style::default().bg(theme.surface))
                 .border_style(if focus == PanelFocus::Left {
                     theme.accent()
                 } else {
@@ -1133,8 +1207,13 @@ fn draw_ui(
                 })
                 .title(" TERMINAL ")
                 .padding(Padding::top(1));
+            let terminal_view_height = usize::from(left_sections[1].height.saturating_sub(3));
+            let terminal_scroll =
+                u16::try_from(terminal_lines.len().saturating_sub(terminal_view_height))
+                    .unwrap_or(u16::MAX);
             let left = Paragraph::new(terminal_lines)
                 .block(terminal_block)
+                .scroll((terminal_scroll, 0))
                 .wrap(Wrap { trim: false });
             frame.render_widget(left, left_sections[1]);
             if rain_enabled && mode == AppMode::Lesson {
@@ -1147,7 +1226,7 @@ fn draw_ui(
                 );
             }
             if pet_enabled && mode == AppMode::Lesson {
-                render_terminal_pet(frame, left_sections[1], animation_time, pet, theme);
+                render_terminal_pet(frame, left_sections[1], pet, cat_animation);
             }
             if mode == AppMode::Lesson && hint_level > 0 {
                 let hint = selected_challenge.and_then(|challenge| {
@@ -1195,6 +1274,7 @@ fn draw_ui(
             };
             let right_block = Block::default()
                 .borders(Borders::ALL)
+                .style(Style::default().bg(theme.surface))
                 .border_style(if focus == PanelFocus::Right {
                     theme.accent()
                 } else {
@@ -1208,7 +1288,11 @@ fn draw_ui(
             if mode == AppMode::Palette {
                 render_palette_overlay(frame, area, palette_query, palette_index, theme);
             }
-            effects.process_effects(elapsed.into(), frame.buffer_mut(), columns[1]);
+            effects.process_effects(
+                elapsed.into(),
+                frame.buffer_mut(),
+                panel_content_area(columns[1]),
+            );
         })
         .map(|_| ())
         .map_err(TuiError::Io)
@@ -1347,7 +1431,7 @@ fn startup_fetch_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
 }
 
 fn starship_prompt_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
-    if contents.starts_with("╭─ ") {
+    if contents.contains("learner@learn") && contents.contains("  ◈") {
         let identity_start = contents.find("learner@learn")?;
         let identity_end = identity_start + "learner@learn".len();
         let icon_start = contents[identity_end..].find("  ◈")? + identity_end;
@@ -1376,7 +1460,7 @@ fn starship_prompt_line(contents: &str, theme: Theme) -> Option<Line<'static>> {
         ]));
     }
     if let Some(operator_start) = contents.find("❯")
-        && contents.starts_with("╰─")
+        && (contents.starts_with("╰─") || contents.starts_with("❯"))
     {
         return Some(Line::from(vec![
             Span::styled(contents[..operator_start].to_owned(), theme.muted()),
@@ -2004,16 +2088,51 @@ fn docs_sidebar_lines(
     lines
 }
 
+fn append_terminal_snapshot(
+    history: &mut Vec<Line<'static>>,
+    parser: &vt100::Parser,
+    width: u16,
+    theme: Theme,
+) {
+    let snapshot = terminal_lines_with_cursor(parser, width, false, theme);
+    let Some(last_non_empty) = snapshot.iter().rposition(|line| {
+        line.spans
+            .iter()
+            .any(|span| !span.content.trim().is_empty())
+    }) else {
+        return;
+    };
+    history.extend(snapshot.into_iter().take(last_non_empty + 1));
+}
+
+fn next_challenge_history_lines(
+    challenge: &learn_challenge::CompiledChallenge,
+    theme: Theme,
+) -> Vec<Line<'static>> {
+    vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("✦ NEXT CHALLENGE  /  {}", challenge.spec.meta.title),
+            theme.accent().add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            challenge.spec.objective.text.clone(),
+            theme.fg,
+        )),
+        Line::from(Span::styled(
+            format!("skill  {}", challenge.spec.id),
+            theme.muted(),
+        )),
+        Line::from(""),
+    ]
+}
+
 fn completion_lines(
     challenge: Option<&learn_challenge::CompiledChallenge>,
     next_title: Option<&str>,
-    elapsed: Duration,
     score: usize,
     theme: Theme,
 ) -> Vec<Line<'static>> {
-    let xp = usize::try_from((elapsed.as_millis() / 12).min(100)).unwrap_or(100);
-    let spinner =
-        ["■", "□", "▪", "▫"][usize::try_from((elapsed.as_millis() / 120) % 4).unwrap_or(0)];
     let title = challenge.map_or("Quest complete", |item| item.spec.meta.title.as_str());
     let next_line = next_title.map_or_else(
         || "NEXT QUEST  /  skill path complete".to_owned(),
@@ -2022,7 +2141,7 @@ fn completion_lines(
     vec![
         Line::from(""),
         Line::from(Span::styled(
-            format!("{spinner}  QUEST CLEARED  {spinner}"),
+            "✓  QUEST CLEARED",
             Style::default()
                 .fg(theme.success)
                 .add_modifier(Modifier::BOLD),
@@ -2036,7 +2155,6 @@ fn completion_lines(
             "VERIFIER STATUS  /  ALL OBJECTIVES MATCHED",
             theme.accent(),
         )),
-        square_progress_line("XP", xp, 16, theme),
         Line::from(Span::styled(
             format!("score: {score} quests mastered"),
             theme.accent(),
@@ -2084,34 +2202,13 @@ fn render_palette_overlay(
     frame.render_widget(palette, popup);
 }
 
-fn square_progress_line(label: &str, value: usize, width: usize, theme: Theme) -> Line<'static> {
-    let filled = width.saturating_mul(value.min(100)) / 100;
-    Line::from(vec![
-        Span::styled(
-            format!("{label:>3}  "),
-            Style::default()
-                .fg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("■".repeat(filled), Style::default().fg(theme.success)),
-        Span::styled("·".repeat(width.saturating_sub(filled)), theme.muted()),
-        Span::styled(format!("  {value:03}%"), theme.accent()),
-    ])
-}
-
 fn render_terminal_pet(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
-    time: Duration,
     pet: &PetState,
-    theme: Theme,
+    cat_animation: &CatAnimation,
 ) {
-    let inner = Rect::new(
-        area.x,
-        area.y.saturating_add(1),
-        area.width,
-        area.height.saturating_sub(1),
-    );
+    let inner = panel_content_area(area);
     if inner.width < PET_WIDTH || inner.height < PET_HEIGHT {
         return;
     }
@@ -2120,44 +2217,18 @@ fn render_terminal_pet(
     let max_x = inner.width.saturating_sub(width);
     let max_y = inner.height.saturating_sub(height);
     let x = u16::try_from(pet.x.max(0)).unwrap_or(0).min(max_x);
-    let y = u16::try_from(pet.y.max(0)).unwrap_or(0).min(max_y);
     let pet_area = Rect::new(
         inner.x.saturating_add(x),
-        inner.y.saturating_add(y),
+        inner.y.saturating_add(max_y),
         width,
         height,
     );
-    let blink = (time.as_millis() / 900) % 7 == 0;
-    let eyes = if blink { "—  —" } else { "●  ●" };
-    let tail = if pet.mood % 2 == 0 { "╱" } else { "╲" };
-    let orange = Style::default().fg(theme.pet_primary);
-    let orange_light = Style::default().fg(theme.pet_secondary);
-    let shadow = Style::default().fg(theme.muted);
-    let eyes_style = Style::default().fg(Color::Rgb(48, 39, 35));
-    let lines = vec![
-        Line::from(Span::styled("  ▗▄██▄▖ ▗▄██▄▖ ", orange_light)),
-        Line::from(Span::styled(" ▟██████████▙  ", orange)),
-        Line::from(vec![
-            Span::styled("▐██  ", orange),
-            Span::styled(eyes, eyes_style),
-            Span::styled("  ██▌ ", orange),
-        ]),
-        Line::from(vec![
-            Span::styled("▐██   ", orange),
-            Span::styled("▾", orange_light),
-            Span::styled("   ██▌ ", orange),
-        ]),
-        Line::from(vec![Span::styled(" ▜██  ᴗ  ██▛ ", orange)]),
-        Line::from(vec![
-            Span::styled("  ▀███████▀  ", orange),
-            Span::styled(tail, orange_light),
-        ]),
-        Line::from(vec![
-            Span::styled("   ▀▀    ▀▀   ", shadow),
-            Span::styled(tail, orange_light),
-        ]),
-    ];
-    frame.render_widget(Paragraph::new(lines).alignment(Alignment::Left), pet_area);
+    cat_animation.render(
+        frame,
+        pet_area,
+        pet.animation_frame(cat_animation.frame_count()),
+        pet.facing_right,
+    );
 }
 
 fn render_inline_hint(
@@ -2169,11 +2240,12 @@ fn render_inline_hint(
     let Some(hint) = hint else {
         return;
     };
-    let height = 3_u16.min(area.height);
+    let content = panel_content_area(area);
+    let height = 3_u16.min(content.height);
     let hint_area = Rect::new(
-        area.x.saturating_add(1),
-        area.bottom().saturating_sub(height),
-        area.width.saturating_sub(2),
+        content.x,
+        content.bottom().saturating_sub(height),
+        content.width,
         height,
     );
     let lines = vec![Line::from(vec![
@@ -2195,12 +2267,7 @@ fn render_content_rain(
     time: Duration,
     theme: Theme,
 ) {
-    let inner = Rect::new(
-        area.x,
-        area.y.saturating_add(1),
-        area.width,
-        area.height.saturating_sub(1),
-    );
+    let inner = panel_content_area(area);
     if inner.width == 0 || inner.height == 0 {
         return;
     }
@@ -2258,6 +2325,17 @@ fn render_content_rain(
             cell.set_symbol(symbols[symbol_index]).set_style(style);
         }
     }
+}
+
+/// Content bounds for the terminal pane. Decorations must never write into
+/// the pane's border or into the neighboring challenge/docs views.
+fn panel_content_area(area: Rect) -> Rect {
+    Rect::new(
+        area.x.saturating_add(1),
+        area.y.saturating_add(2),
+        area.width.saturating_sub(2),
+        area.height.saturating_sub(3),
+    )
 }
 
 fn truncate_text(value: &str, width: usize) -> String {
@@ -2373,6 +2451,12 @@ pub enum TuiError {
     /// Local daemon state failure.
     #[error(transparent)]
     Daemon(#[from] learn_daemon::DaemonError),
+    /// Embedded image decoding failure.
+    #[error("embedded image decoding failed: {0}")]
+    Image(#[source] image::ImageError),
+    /// Unicode terminal image encoding failure.
+    #[error("terminal image encoding failed: {0}")]
+    ImageRenderer(#[source] ratatui_image::errors::Errors),
 }
 
 #[cfg(test)]
@@ -2383,6 +2467,16 @@ mod tests {
     fn pane_size_matches_split_terminal_content() {
         assert_eq!(pane_size(100, 40), (70, 29));
         assert_eq!(pane_size(1, 1), (1, 1));
+    }
+
+    #[test]
+    fn terminal_overlays_stay_inside_their_panel() {
+        let panel = Rect::new(4, 5, 80, 30);
+        let content = panel_content_area(panel);
+
+        assert_eq!(content, Rect::new(5, 7, 78, 27));
+        assert_eq!(content.right(), panel.right().saturating_sub(1));
+        assert_eq!(content.bottom(), panel.bottom().saturating_sub(1));
     }
 
     #[test]
@@ -2400,6 +2494,21 @@ mod tests {
         let popup = centered_rect(72, 55, Rect::new(0, 0, 80, 24));
         assert_eq!(popup, Rect::new(11, 5, 57, 13));
         assert_eq!(centered_rect(72, 55, Rect::new(0, 0, 1, 1)).width, 0);
+    }
+
+    #[test]
+    fn terminal_history_preserves_completed_session_output() {
+        let mut parser = vt100::Parser::new(3, 20, 64);
+        parser.process(b"hello");
+        let mut history = Vec::new();
+
+        append_terminal_snapshot(&mut history, &parser, 20, ThemeId::Default.theme());
+
+        assert!(
+            history
+                .iter()
+                .any(|line| { line.spans.iter().any(|span| span.content.contains("hello")) })
+        );
     }
 
     #[test]
@@ -2441,6 +2550,8 @@ mod tests {
         assert_eq!(palette_matches("ch"), vec![1]);
         assert_eq!(palette_matches("pet"), vec![5]);
         assert_eq!(palette_matches("rain"), vec![6]);
+        assert_eq!(palette_matches("reastart"), vec![4]);
+        assert_eq!(palette_matches("vmi"), vec![3]);
         assert!(app_leader(KeyCode::Char(' '), KeyModifiers::CONTROL));
         assert!(!app_leader(KeyCode::Char(' '), KeyModifiers::NONE));
     }
