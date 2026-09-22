@@ -2191,34 +2191,58 @@ fn render_content_rain(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let seed = challenge.map_or(7_u128, |item| {
-        item.spec
-            .id
-            .as_str()
-            .bytes()
-            .fold(0_u128, |sum, byte| sum + u128::from(byte))
-    });
-    let tick = time.as_millis() / 260;
-    let symbols = ["╎", "┆", "┊", "⠂", "⠐", "⠒"];
+    let challenge_id = challenge.map_or("ambient", |item| item.spec.id.as_str());
+    let seed = challenge_id
+        .bytes()
+        .enumerate()
+        .fold(7_u128, |sum, (index, byte)| {
+            sum.wrapping_add(u128::from(byte) * u128::try_from(index + 1).unwrap_or(1))
+        });
+    let symbols: &[&str] = if challenge_id.contains("search") {
+        &["⠂", "╎", "⋮", "┊", "│"]
+    } else if challenge_id.contains("files") {
+        &["╎", "┆", "┊", "╿", "│"]
+    } else {
+        &["·", "⠐", "╎", "⋮", "│"]
+    };
     let symbol_count = u128::try_from(symbols.len()).unwrap_or(1);
+    let tick = time.as_millis() / 120;
+    let stream_count = (inner.width / 3).saturating_add(1);
     let buffer = frame.buffer_mut();
-    for index in 0..12_u32 {
-        let index = u128::from(index);
-        let x_offset = (seed + index * 17 + tick * (index + 1)) % u128::from(inner.width);
-        let y_offset = (seed + index * 11 + tick * 2) % u128::from(inner.height);
+    for stream in 0..stream_count {
+        let index = u128::from(stream);
+        let phase = (seed + index * 41) % u128::from(inner.height.saturating_add(8));
+        let fall_rate = 1 + (seed + index * 7) % 3;
+        let length = 2 + (seed + index * 13) % 5;
+        let span = u128::from(inner.height) + length + 2;
+        let head = i32::try_from((tick * fall_rate + phase) % span).unwrap_or(0)
+            - i32::try_from(length).unwrap_or(0);
+        let base_x = (index * 3 + seed) % u128::from(inner.width);
+        let drift = i32::try_from((tick / (fall_rate + 1) + phase) % 5).unwrap_or(0) - 2;
+        let x_offset =
+            (i32::try_from(base_x).unwrap_or(0) + drift).rem_euclid(i32::from(inner.width));
         let x = inner.x + u16::try_from(x_offset).unwrap_or(0);
-        let y = inner.y + u16::try_from(y_offset).unwrap_or(0);
-        let is_blank = buffer.cell((x, y)).is_some_and(|cell| cell.symbol() == " ");
-        if is_blank {
-            if let Some(cell) = buffer.cell_mut((x, y)) {
-                let symbol_index = usize::try_from((seed + index) % symbol_count).unwrap_or(0);
-                cell.set_symbol(symbols[symbol_index])
-                    .set_style(Style::default().fg(if index % 3 == 0 {
-                        theme.accent
-                    } else {
-                        theme.dim
-                    }));
+        for trail in 0..length {
+            let y_offset = head - i32::try_from(trail).unwrap_or(0);
+            if y_offset < 0 || y_offset >= i32::from(inner.height) {
+                continue;
             }
+            let y = inner.y + u16::try_from(y_offset).unwrap_or(0);
+            let Some(cell) = buffer.cell_mut((x, y)) else {
+                continue;
+            };
+            if cell.symbol() != " " {
+                continue;
+            }
+            let symbol_index = usize::try_from((seed + index + trail) % symbol_count).unwrap_or(0);
+            let style = match trail {
+                0 => Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+                1 => Style::default().fg(theme.dim),
+                _ => Style::default().fg(theme.muted),
+            };
+            cell.set_symbol(symbols[symbol_index]).set_style(style);
         }
     }
 }
