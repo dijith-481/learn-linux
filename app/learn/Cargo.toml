@@ -1,0 +1,26 @@
+[package]
+name = "learn"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+clap.workspace = true
+crossterm.workspace = true
+learn-challenge = { path = "../../crates/learn-challenge" }
+learn-core = { path = "../../crates/learn-core" }
+learn-daemon = { path = "../../crates/learn-daemon" }
+learn-tui = { path = "../../crates/learn-tui" }
+learn-runtime = { path = "../../crates/learn-runtime" }
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "learn"
+path = "src/main.rs"

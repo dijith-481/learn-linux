@@ -1,0 +1,16 @@
+[package]
+name = "learn-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+learn-core = { path = "../learn-core" }
+portable-pty.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

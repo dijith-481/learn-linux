@@ -1,0 +1,389 @@
+challenge "foundation.orientation" version=1 {
+    title "This Is a Shell"
+    summary "Meet the shell as a program that reads commands and reports results."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        teaches "terminal.orientation"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "printf"
+            allow "cat"
+        }
+    }
+    objective {
+        text "Print the message stored in ~/welcome.txt."
+    }
+    setup {
+        write "~/welcome.txt" {
+            text "Welcome to a real shell."
+        }
+    }
+    verify {
+        file-read "~/welcome.txt" "Welcome to a real shell."
+    }
+    hints {
+        hint level=1 {
+            text "A command can read a file and send its contents to the terminal."
+        }
+        hint level=2 {
+            text "Look up the cat command in the local docs panel."
+        }
+    }
+    solution {
+        concept "cat reads bytes from a file and writes them to standard output."
+        command "cat ~/welcome.txt"
+        why "The path names the file to read."
+    }
+}
+
+challenge "fs.navigation.pwd" version=1 {
+    title "Where Am I?"
+    summary "Use the shell to identify your current location."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "terminal.orientation"
+        teaches "fs.navigation.basic"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "pwd"
+            allow "cd"
+        }
+    }
+    objective {
+        text "Move into ~/practice and leave the shell there."
+    }
+    setup {
+        mkdir "~/practice"
+    }
+    verify {
+        cwd "~/practice"
+    }
+    hints {
+        hint level=1 {
+            text "cd changes location; pwd confirms it."
+        }
+    }
+    solution {
+        concept "pwd prints the shell's working directory, while cd changes it."
+        command "cd ~/practice"
+        command "pwd"
+    }
+}
+
+challenge "fs.files.make" version=1 {
+    title "Make a Place for Notes"
+    summary "Create a directory and a file for a small project."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "fs.navigation.basic"
+        teaches "fs.files.directories"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mkdir"
+            allow "touch"
+        }
+    }
+    objective {
+        text "Create ~/project and an empty ~/project/notes.txt file."
+    }
+    verify {
+        all {
+            file-exists "~/project"
+            file-exists "~/project/notes.txt"
+        }
+    }
+    solution {
+        concept "mkdir creates directories and touch creates an empty file."
+        command "mkdir ~/project"
+        command "touch ~/project/notes.txt"
+    }
+}
+
+challenge "fs.files.read" version=1 {
+    title "Read the Briefing"
+    summary "Read a prepared file without opening an editor."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "fs.files.directories"
+        teaches "fs.files.read"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "less"
+        }
+    }
+    objective {
+        text "Print the briefing so that it appears in the terminal."
+    }
+    setup {
+        write "~/briefing.txt" {
+            text "The next task is to find a hidden note."
+        }
+    }
+    verify {
+        file-read "~/briefing.txt" "The next task is to find a hidden note."
+    }
+    solution {
+        concept "cat sends a file to standard output."
+        command "cat ~/briefing.txt"
+    }
+}
+
+challenge "fs.files.move" version=1 {
+    title "Put the Note Away"
+    summary "Move a file into the directory where it belongs."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "fs.files.read"
+        teaches "fs.files.move-copy"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mkdir"
+            allow "mv"
+        }
+    }
+    objective {
+        text "Move ~/loose-note.txt into ~/archive/."
+    }
+    setup {
+        write "~/loose-note.txt" {
+            text "Keep me organized."
+        }
+        mkdir "~/archive"
+    }
+    verify {
+        all {
+            file-exists "~/archive/loose-note.txt"
+            file-missing "~/loose-note.txt"
+        }
+    }
+    solution {
+        concept "mv changes a path by moving a file into a destination directory."
+        command "mv ~/loose-note.txt ~/archive/"
+    }
+}
+
+challenge "fs.search.find" version=1 {
+    title "The Lost Note"
+    summary "Find a file in a directory tree without opening every folder."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "fs.navigation.basic"
+        teaches "fs.search.find"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "find"
+            allow "cat"
+        }
+    }
+    objective {
+        text "Locate treasure.txt under ~/archive and print its contents."
+    }
+    setup {
+        mkdir "~/archive/2024/notes"
+        mkdir "~/archive/2025/drafts"
+        write "~/archive/2024/notes/treasure.txt" {
+            text "You found it."
+        }
+        write "~/archive/2025/drafts/todo.txt" {
+            text "Nothing useful here."
+        }
+    }
+    verify {
+        file-read "~/archive/2024/notes/treasure.txt" "You found it."
+    }
+    hints {
+        hint level=1 {
+            text "Linux has a command made for walking a directory tree."
+        }
+        hint level=2 {
+            text "Search the local docs for find file by name."
+        }
+    }
+    solution {
+        concept "find searches a directory tree using conditions such as -name."
+        command "find ~/archive -name treasure.txt"
+        command "cat ~/archive/2024/notes/treasure.txt"
+        why "The starting path limits the search to the archive."
+        why "-name matches the final filename."
+    }
+}
+
+challenge "shell.redirect.output" version=1 {
+    title "Save the Output"
+    summary "Send command output into a file instead of only displaying it."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "fs.files.read"
+        teaches "shell.redirection"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "printf"
+            allow "cat"
+        }
+    }
+    objective {
+        text "Create ~/result.txt containing exactly the word saved."
+    }
+    verify {
+        file-equals "~/result.txt" "saved"
+    }
+    solution {
+        concept "The > redirection operator connects standard output to a file."
+        command "printf saved > ~/result.txt"
+        why "printf produces the bytes and > opens the destination for writing."
+    }
+}
+
+challenge "shell.pipes.basic" version=1 {
+    title "Tools Compose"
+    summary "Pass the output of one command into another command."
+    difficulty "beginner"
+    estimated-minutes 5
+    skills {
+        requires "shell.redirection"
+        teaches "shell.pipes"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "printf"
+            allow "grep"
+        }
+    }
+    objective {
+        text "Create ~/match.txt containing only the line that mentions Linux."
+    }
+    setup {
+        write "~/lines.txt" {
+            text "apples\nLinux is a system\noranges"
+        }
+    }
+    verify {
+        file-contains "~/match.txt" "Linux is a system"
+    }
+    solution {
+        concept "A pipe connects standard output from one process to standard input of another."
+        command "cat ~/lines.txt | grep Linux > ~/match.txt"
+    }
+}
+
+challenge "fs.search.text" version=1 {
+    title "Find the Important Line"
+    summary "Search text inside a file instead of reading every line."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "shell.pipes"
+        teaches "text.search.grep"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+            allow "cat"
+        }
+    }
+    objective {
+        text "Create ~/answer.txt with the line containing the word urgent."
+    }
+    setup {
+        write "~/service.log" {
+            text "INFO started\nWARN retrying\nURGENT database unavailable"
+        }
+    }
+    verify {
+        file-contains "~/answer.txt" "URGENT database unavailable"
+    }
+    solution {
+        concept "grep selects input lines matching a pattern."
+        command "grep URGENT ~/service.log > ~/answer.txt"
+    }
+}
+
+challenge "fs.patterns.glob" version=1 {
+    title "Group the Reports"
+    summary "Use a filename pattern to work with a family of files."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "fs.files.directories"
+        teaches "shell.globbing"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mkdir"
+            allow "touch"
+            allow "cp"
+        }
+    }
+    objective {
+        text "Copy every .log file from ~/reports into ~/backup/."
+    }
+    setup {
+        mkdir "~/reports"
+        mkdir "~/backup"
+        write "~/reports/one.log" {
+            text "one"
+        }
+        write "~/reports/two.log" {
+            text "two"
+        }
+        write "~/reports/readme.txt" {
+            text "not a log"
+        }
+    }
+    verify {
+        all {
+            file-exists "~/backup/one.log"
+            file-exists "~/backup/two.log"
+        }
+    }
+    solution {
+        concept "The * wildcard expands to matching pathnames before cp runs."
+        command "cp ~/reports/*.log ~/backup/"
+    }
+}

@@ -1,0 +1,29 @@
+{
+  "name": "learn-linux-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "build": "tsc --noEmit && vp build",
+    "check": "tsc --noEmit",
+    "test": "vp test run"
+  },
+  "dependencies": {
+    "solid-js": "^1.9.15"
+  },
+  "devDependencies": {
+    "vite": "catalog:",
+    "vite-plugin-solid": "^2.11.0",
+    "typescript": "^5.9.3",
+    "vitest": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.5.1",
+      "onFail": "download"
+    }
+  }
+}

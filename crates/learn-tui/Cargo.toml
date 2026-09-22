@@ -1,0 +1,21 @@
+[package]
+name = "learn-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crossterm.workspace = true
+learn-challenge = { path = "../learn-challenge" }
+learn-daemon = { path = "../learn-daemon" }
+learn-protocol = { path = "../learn-protocol" }
+learn-runtime = { path = "../learn-runtime" }
+ratatui.workspace = true
+tachyonfx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+vt100 = "0.16.2"
+
+[lints]
+workspace = true

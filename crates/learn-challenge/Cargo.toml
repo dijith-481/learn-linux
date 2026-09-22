@@ -1,0 +1,18 @@
+[package]
+name = "learn-challenge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kdl.workspace = true
+learn-core = { path = "../learn-core" }
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest = "1.7.0"
+
+[lints]
+workspace = true
