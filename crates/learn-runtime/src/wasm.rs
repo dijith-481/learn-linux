@@ -561,7 +561,8 @@ impl VirtualShell {
             "pwd" => CommandResult::success(format!("{}\n", self.cwd).into_bytes()),
             "printf" => CommandResult::success(printf_bytes(&argv[1..])),
             "echo" => CommandResult::success(format!("{}\n", argv[1..].join(" ")).into_bytes()),
-            "true" | "clear" | "exit" => CommandResult::success(Vec::new()),
+            "true" | "exit" => CommandResult::success(Vec::new()),
+            "clear" => CommandResult::success(b"\x1b[2J\x1b[H".to_vec()),
             "help" => CommandResult::success(
                 b"Try: ls  cat FILE  cd DIR  mkdir DIR  touch FILE  find  grep  pwd  exit\n"
                     .to_vec(),
@@ -1494,6 +1495,14 @@ mod tests {
             .read_to_string(&mut output)
             .expect("session output is readable");
         assert!(output.contains("\r\x1b[2K\x1b[1A\r\x1b[2K"));
+    }
+
+    #[test]
+    fn clear_emits_screen_clear_and_cursor_home_controls() {
+        let mut shell = VirtualShell::new(EnvironmentSpec::default());
+        let result = shell.execute_line("clear");
+        assert_eq!(result.status, 0);
+        assert_eq!(result.output, b"\x1b[2J\x1b[H");
     }
 
     #[test]
