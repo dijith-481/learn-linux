@@ -356,6 +356,7 @@ impl KeyboardState {
                     self.typed_at.clear();
                 }
                 self.typed_at.push(now);
+                let character = shifted_character(character, modifiers);
                 Some(if character == ' ' {
                     "Space".to_owned()
                 } else {
@@ -1025,7 +1026,7 @@ async fn app_loop(
                                 if !key.modifiers.contains(KeyModifiers::CONTROL)
                                     && !key.modifiers.contains(KeyModifiers::ALT) =>
                             {
-                                palette_query.push(character);
+                                palette_query.push(shifted_character(character, key.modifiers));
                                 palette_index = 0;
                             }
                             KeyCode::Enter => {
@@ -1128,7 +1129,10 @@ async fn app_loop(
                             .modifiers
                             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
                         {
-                            typer_dojo.handle_key(key.code, animation_time);
+                            typer_dojo.handle_key(
+                                shifted_key_code(key.code, key.modifiers),
+                                animation_time,
+                            );
                         }
                         continue;
                     }
@@ -1136,7 +1140,10 @@ async fn app_loop(
                         if key.code == KeyCode::Esc && vim_dojo.is_menu() {
                             mode = AppMode::Lesson;
                         } else {
-                            vim_dojo.handle_key(key.code, key.modifiers);
+                            vim_dojo.handle_key(
+                                shifted_key_code(key.code, key.modifiers),
+                                key.modifiers,
+                            );
                         }
                         continue;
                     }
@@ -1180,7 +1187,7 @@ async fn app_loop(
                                     .modifiers
                                     .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
                             {
-                                docs_query.push(character);
+                                docs_query.push(shifted_character(character, key.modifiers));
                                 refresh_docs(
                                     daemon,
                                     client.as_mut(),
@@ -1265,8 +1272,12 @@ async fn app_loop(
                                 )
                                 .await?;
                             }
-                            KeyCode::Char(character) if key.modifiers.is_empty() => {
-                                docs_query.push(character);
+                            KeyCode::Char(character)
+                                if !key
+                                    .modifiers
+                                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                            {
+                                docs_query.push(shifted_character(character, key.modifiers));
                                 refresh_docs(
                                     daemon,
                                     client.as_mut(),
@@ -1295,7 +1306,7 @@ async fn app_loop(
                             {
                                 pending_hint_output = Some(Vec::new());
                             }
-                            if let Some(bytes) = key_bytes(key.code, key.modifiers) {
+                            if let Some(bytes) = encode_terminal_key(key.code, key.modifiers) {
                                 if let Some(client) = client.as_mut() {
                                     client
                                         .send_terminal_input(
@@ -1633,7 +1644,7 @@ fn track_shell_input(input: &mut String, code: KeyCode, modifiers: KeyModifiers)
         KeyCode::Char(character)
             if !modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
         {
-            input.push(character);
+            input.push(shifted_character(character, modifiers));
             None
         }
         _ => None,
@@ -3385,7 +3396,8 @@ fn pane_size(columns: u16, rows: u16) -> (u16, u16) {
     )
 }
 
-fn key_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
+/// Convert a key event to the bytes expected by the virtual shell.
+pub fn encode_terminal_key(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
     if modifiers.contains(KeyModifiers::CONTROL) {
         if let KeyCode::Char(character) = code {
             let character = character.to_ascii_lowercase();
@@ -3395,7 +3407,9 @@ fn key_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
         }
     }
     Some(match code {
-        KeyCode::Char(character) => character.to_string().into_bytes(),
+        KeyCode::Char(character) => shifted_character(character, modifiers)
+            .to_string()
+            .into_bytes(),
         KeyCode::Enter => vec![b'\r'],
         KeyCode::Backspace => vec![0x7f],
         KeyCode::Tab => vec![b'\t'],
@@ -3407,7 +3421,45 @@ fn key_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
     })
 }
 
-/// TUI failure.
+fn shifted_character(character: char, modifiers: KeyModifiers) -> char {
+    if !modifiers.contains(KeyModifiers::SHIFT) {
+        return character;
+    }
+    match character {
+        'a'..='z' => character.to_ascii_uppercase(),
+        '1' => '!',
+        '2' => '@',
+        '3' => '#',
+        '4' => '$',
+        '5' => '%',
+        '6' => '^',
+        '7' => '&',
+        '8' => '*',
+        '9' => '(',
+        '0' => ')',
+        '`' => '~',
+        '-' => '_',
+        '=' => '+',
+        '[' => '{',
+        ']' => '}',
+        '\\' => '|',
+        ';' => ':',
+        '\'' => '"',
+        ',' => '<',
+        '.' => '>',
+
+        '/' => '?',
+        _ => character,
+    }
+}
+fn shifted_key_code(code: KeyCode, modifiers: KeyModifiers) -> KeyCode {
+    match code {
+        KeyCode::Char(character) => KeyCode::Char(shifted_character(character, modifiers)),
+        code => code,
+    }
+}
+
+/// Errors returned by the full-screen terminal client.
 #[derive(Debug, Error)]
 pub enum TuiError {
     /// Terminal I/O failure.
@@ -3544,17 +3596,29 @@ mod tests {
     }
 
     #[test]
-    fn shell_key_encoding_preserves_normal_and_control_input() {
+    fn shell_key_encoding_applies_shift_and_control() {
         assert_eq!(
-            key_bytes(KeyCode::Char('x'), KeyModifiers::NONE),
+            encode_terminal_key(KeyCode::Char('x'), KeyModifiers::NONE),
             Some(vec![b'x'])
         );
         assert_eq!(
-            key_bytes(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            encode_terminal_key(KeyCode::Char('a'), KeyModifiers::SHIFT),
+            Some(vec![b'A'])
+        );
+        assert_eq!(
+            encode_terminal_key(KeyCode::Char('1'), KeyModifiers::SHIFT),
+            Some(vec![b'!'])
+        );
+        assert_eq!(
+            encode_terminal_key(KeyCode::Char('/'), KeyModifiers::SHIFT),
+            Some(vec![b'?'])
+        );
+        assert_eq!(
+            encode_terminal_key(KeyCode::Char('c'), KeyModifiers::CONTROL),
             Some(vec![3])
         );
         assert_eq!(
-            key_bytes(KeyCode::Enter, KeyModifiers::NONE),
+            encode_terminal_key(KeyCode::Enter, KeyModifiers::NONE),
             Some(vec![b'\r'])
         );
     }

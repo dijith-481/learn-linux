@@ -9,13 +9,14 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use learn_challenge::compile_builtin;
 use learn_daemon::Daemon;
 use learn_runtime::{
     WasmSession, default_rootfs_path, doctor, install_rootfs, start_wasm_session, verify_rootfs,
 };
+use learn_tui::encode_terminal_key;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -287,7 +288,11 @@ fn interactive_loop(
         if event::poll(Duration::from_millis(20))? {
             match event::read()? {
                 Event::Key(key) => {
-                    if let Some(bytes) = key_bytes(key.code, key.modifiers) {
+                    let bytes = match key.code {
+                        KeyCode::Esc => Some(vec![0x1b]),
+                        _ => encode_terminal_key(key.code, key.modifiers),
+                    };
+                    if let Some(bytes) = bytes {
                         session.write(&bytes)?;
                     }
                 }
@@ -297,27 +302,4 @@ fn interactive_loop(
         }
     }
     Ok(())
-}
-
-fn key_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
-    if modifiers.contains(KeyModifiers::CONTROL) {
-        if let KeyCode::Char(character) = code {
-            let character = character.to_ascii_lowercase();
-            if character.is_ascii_lowercase() {
-                return Some(vec![character as u8 - b'a' + 1]);
-            }
-        }
-    }
-    Some(match code {
-        KeyCode::Char(character) => character.to_string().into_bytes(),
-        KeyCode::Enter => vec![b'\r'],
-        KeyCode::Backspace => vec![0x7f],
-        KeyCode::Tab => vec![b'\t'],
-        KeyCode::Esc => vec![0x1b],
-        KeyCode::Up => b"\x1b[A".to_vec(),
-        KeyCode::Down => b"\x1b[B".to_vec(),
-        KeyCode::Right => b"\x1b[C".to_vec(),
-        KeyCode::Left => b"\x1b[D".to_vec(),
-        _ => return None,
-    })
 }
