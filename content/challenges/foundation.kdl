@@ -72,6 +72,9 @@ challenge "fs.navigation.pwd" version=1 {
         hint level=1 {
             text "cd changes location; pwd confirms it."
         }
+        hint level=2 {
+            text "The practice folder is inside your home directory."
+        }
     }
     solution {
         concept "pwd prints the shell's working directory, while cd changes it."
@@ -105,6 +108,14 @@ challenge "fs.files.make" version=1 {
         all {
             file-exists "~/project"
             file-exists "~/project/notes.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Create the folder first, then place the file inside it."
+        }
+        hint level=2 {
+            text "Search the docs for making a folder and creating an empty file."
         }
     }
     solution {
@@ -143,6 +154,14 @@ challenge "fs.files.read" version=1 {
     verify {
         file-read "~/briefing.txt" "The next task is to find a hidden note."
     }
+    hints {
+        hint level=1 {
+            text "This task is about showing a file's contents, not editing them."
+        }
+        hint level=2 {
+            text "Search the local docs for a command that prints a file."
+        }
+    }
     solution {
         concept "cat sends a file to standard output."
         command "cat ~/briefing.txt"
@@ -180,6 +199,14 @@ challenge "fs.files.move" version=1 {
         all {
             file-exists "~/archive/loose-note.txt"
             file-missing "~/loose-note.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "A move needs a source file and a destination folder."
+        }
+        hint level=2 {
+            text "The archive folder already exists; move the loose note into it."
         }
     }
     solution {
@@ -263,6 +290,14 @@ challenge "shell.redirect.output" version=1 {
     verify {
         file-equals "~/result.txt" "saved"
     }
+    hints {
+        hint level=1 {
+            text "First produce the word at the prompt, then direct that output into a file."
+        }
+        hint level=2 {
+            text "The > operator writes a command's output to a file."
+        }
+    }
     solution {
         concept "The > redirection operator connects standard output to a file."
         command "printf saved > ~/result.txt"
@@ -300,6 +335,14 @@ challenge "shell.pipes.basic" version=1 {
     verify {
         file-contains "~/match.txt" "Linux is a system"
     }
+    hints {
+        hint level=1 {
+            text "Read the lines, then keep only the one that mentions Linux."
+        }
+        hint level=2 {
+            text "A pipe passes output to the next command; > saves the final result."
+        }
+    }
     solution {
         concept "A pipe connects standard output from one process to standard input of another."
         command "cat ~/lines.txt | grep Linux > ~/match.txt"
@@ -334,6 +377,14 @@ challenge "fs.search.text" version=1 {
     }
     verify {
         file-contains "~/answer.txt" "URGENT database unavailable"
+    }
+    hints {
+        hint level=1 {
+            text "Search inside the log instead of reading every line."
+        }
+        hint level=2 {
+            text "A matching line can be saved with output redirection."
+        }
     }
     solution {
         concept "grep selects input lines matching a pattern."
@@ -380,6 +431,14 @@ challenge "fs.patterns.glob" version=1 {
         all {
             file-exists "~/backup/one.log"
             file-exists "~/backup/two.log"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "A filename pattern can stand for several matching files."
+        }
+        hint level=2 {
+            text "The * wildcard matches any characters before .log."
         }
     }
     solution {

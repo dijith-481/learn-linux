@@ -12,8 +12,9 @@ use std::time::{Duration, Instant};
 use crossterm::{
     cursor,
     event::{
-        self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
-        ModifierKeyCode, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        KeyboardEnhancementFlags, ModifierKeyCode, MouseButton, MouseEventKind,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -511,7 +512,7 @@ fn render_keyboard(
             "Shift", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "Shift",
         ],
         &[
-            "Ctrl", "Win", "Alt", "Space", "Alt", "Win", "Menu", "Ctrl", "←", "→",
+            "Ctrl", "Meta", "Alt", "Space", "Alt", "Meta", "Menu", "Ctrl", "←", "→",
         ],
     ];
     let base_x = area.x.saturating_add(area.width.saturating_sub(46) / 2);
@@ -519,13 +520,14 @@ fn render_keyboard(
         let y = area
             .y
             .saturating_add(3 + u16::try_from(row).unwrap_or(0) * 2);
-        let mut x = base_x.saturating_add(u16::try_from(row.min(3)).unwrap_or(0));
+        let stagger = if row == 4 { 0 } else { row.min(3) };
+        let mut x = base_x.saturating_add(u16::try_from(stagger).unwrap_or(0));
         for (position, label) in keys.iter().enumerate() {
             let width = match *label {
-                "Esc" | "Back" | "Tab" | "Ctrl" | "Menu" => 4,
+                "Esc" | "Back" | "Tab" | "Ctrl" | "Menu" | "Meta" => 4,
                 "Caps" | "Enter" | "Shift" => 5,
                 "Space" => 8,
-                "Win" | "Alt" => 3,
+                "Alt" => 3,
                 _ => 2,
             };
             if x.saturating_add(width) >= area.right().saturating_sub(1) {
@@ -547,15 +549,14 @@ fn render_keyboard(
                     .style(face),
                 Rect::new(x, y, width, 1),
             );
-            frame.render_widget(
-                Block::default().style(Style::default().bg(shadow)),
-                Rect::new(
-                    x.saturating_add(1),
-                    y.saturating_add(1),
-                    width.saturating_sub(1),
-                    1,
-                ),
-            );
+            for offset in 0..width.saturating_sub(1) {
+                if let Some(cell) = frame
+                    .buffer_mut()
+                    .cell_mut((x.saturating_add(1 + offset), y.saturating_add(1)))
+                {
+                    cell.set_symbol("▀").set_fg(shadow).set_bg(theme.surface);
+                }
+            }
             x = x.saturating_add(width + 1);
         }
     }
@@ -656,7 +657,13 @@ pub async fn run(daemon: &Daemon, socket: Option<&Path>) -> Result<(), TuiError>
 fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>, TuiError> {
     enable_raw_mode().map_err(TuiError::Io)?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, cursor::Hide).map_err(TuiError::Io)?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        cursor::Hide
+    )
+    .map_err(TuiError::Io)?;
     if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
         let _ = execute!(
             stdout,
@@ -675,7 +682,13 @@ fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result
         let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
     }
     disable_raw_mode().map_err(TuiError::Io)?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show).map_err(TuiError::Io)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen,
+        cursor::Show
+    )
+    .map_err(TuiError::Io)?;
     terminal.show_cursor().map_err(TuiError::Io)
 }
 
@@ -739,6 +752,7 @@ async fn app_loop(
     let mut completed = false;
     let mut score = 0_usize;
     let mut hint_level = 0_usize;
+    let mut revealed_hints = [None; 3];
     let mut shell_input = String::new();
     let mut pending_hint_output: Option<Vec<u8>> = None;
     let mut terminal_history = Vec::new();
@@ -858,6 +872,7 @@ async fn app_loop(
             }
             focus = PanelFocus::Left;
             hint_level = 0;
+            revealed_hints = [None; 3];
             pending_hint_output = None;
             shell_input.clear();
         }
@@ -871,6 +886,7 @@ async fn app_loop(
             mode,
             start_transition,
             hint_level,
+            &revealed_hints,
             palette_index,
             &palette_query,
             &docs_query,
@@ -920,6 +936,22 @@ async fn app_loop(
                     if theme_cycle_key(key.code, key.modifiers) {
                         theme_id = theme_id.next();
                         continue;
+                    }
+                    if mode == AppMode::Lesson && key.modifiers.contains(KeyModifiers::CONTROL) {
+                        if let KeyCode::Char('1'..='3') = key.code {
+                            let index = match key.code {
+                                KeyCode::Char('1') => 0,
+                                KeyCode::Char('2') => 1,
+                                _ => 2,
+                            };
+                            if selected_challenge
+                                .as_ref()
+                                .is_some_and(|challenge| challenge.spec.hints.get(index).is_some())
+                            {
+                                revealed_hints[index] = Some(animation_time);
+                            }
+                            continue;
+                        }
                     }
                     if mode == AppMode::Lesson && focus == PanelFocus::Left {
                         pet.handle_key(key.code);
@@ -995,6 +1027,7 @@ async fn app_loop(
                                                 course_complete = false;
                                                 terminal_history.clear();
                                                 hint_level = 0;
+                                                revealed_hints = [None; 3];
                                                 shell_input.clear();
                                                 if client.is_none() {
                                                     session = Some(start_wasm_session(
@@ -1129,6 +1162,7 @@ async fn app_loop(
                                 course_complete = false;
                                 terminal_history.clear();
                                 hint_level = 0;
+                                revealed_hints = [None; 3];
                                 shell_input.clear();
                                 focus = PanelFocus::Left;
                                 if let Some(client) = client.as_mut() {
@@ -1248,6 +1282,21 @@ async fn app_loop(
                             }
                         }
                         _ => {}
+                    }
+                }
+                Event::Mouse(mouse)
+                    if mode == AppMode::Lesson
+                        && mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
+                {
+                    if let Some(index) =
+                        hint_click_index(mouse.column, mouse.row, terminal_columns, terminal_rows)
+                    {
+                        if selected_challenge
+                            .as_ref()
+                            .is_some_and(|challenge| challenge.spec.hints.get(index).is_some())
+                        {
+                            revealed_hints[index] = Some(animation_time);
+                        }
                     }
                 }
                 Event::Resize(columns, rows) => {
@@ -1512,6 +1561,7 @@ fn draw_ui(
     mode: AppMode,
     start_transition: Option<Duration>,
     hint_level: usize,
+    revealed_hints: &[Option<Duration>; 3],
     palette_index: usize,
     palette_query: &str,
     docs_query: &str,
@@ -1572,7 +1622,10 @@ fn draw_ui(
                 .split(area);
             let left_sections = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(9), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(brief_height(area.height)),
+                    Constraint::Min(0),
+                ])
                 .split(columns[0]);
             let brief_lines = challenge_brief_lines(selected_challenge, theme);
             let runtime_text = daemon.runtime.render();
@@ -1635,6 +1688,17 @@ fn draw_ui(
                 Paragraph::new(brief_lines).wrap(Wrap { trim: true }),
                 task_area,
             );
+            if let Some(challenge) = selected_challenge {
+                render_locked_hints(
+                    frame,
+                    brief_inner,
+                    &challenge.spec.hints,
+                    revealed_hints,
+                    animation_time,
+                    animations_enabled,
+                    theme,
+                );
+            }
             if progress_height > 0 {
                 render_level_progress(
                     frame,
@@ -2478,6 +2542,109 @@ fn challenge_lines(
         theme.muted(),
     )));
     lines
+}
+
+fn brief_height(rows: u16) -> u16 {
+    if rows >= 28 {
+        12
+    } else if rows >= 20 {
+        10
+    } else {
+        9
+    }
+}
+
+fn hint_click_index(column: u16, row: u16, columns: u16, rows: u16) -> Option<usize> {
+    let right = if columns >= 118 {
+        (columns.saturating_mul(28) / 100).max(52)
+    } else {
+        columns.saturating_mul(28) / 100
+    };
+    let left = columns.saturating_sub(right);
+    let index = row.checked_sub(4)? as usize;
+    (column > 1
+        && column < left.saturating_sub(1)
+        && index < 3
+        && row < brief_height(rows).saturating_sub(3))
+    .then_some(index)
+}
+
+fn masked_hint(
+    text: &str,
+    revealed: Option<Duration>,
+    now: Duration,
+    animations_enabled: bool,
+    width: usize,
+) -> String {
+    let visible = if animations_enabled {
+        revealed.map_or(0, |at| {
+            ((now.saturating_sub(at).as_millis() as usize * width) / 330).min(width)
+        })
+    } else if revealed.is_some() {
+        width
+    } else {
+        0
+    };
+    text.chars()
+        .take(width)
+        .enumerate()
+        .map(|(index, character)| {
+            if index < visible {
+                character
+            } else if character.is_whitespace() {
+                ' '
+            } else {
+                '▒'
+            }
+        })
+        .collect()
+}
+
+fn render_locked_hints(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    hints: &[learn_challenge::Hint],
+    revealed: &[Option<Duration>; 3],
+    now: Duration,
+    animations_enabled: bool,
+    theme: Theme,
+) {
+    let available = area.height.saturating_sub(5).min(3) as usize;
+    let text_width = usize::from(area.width.saturating_sub(5));
+    for (index, hint) in hints.iter().take(available).enumerate() {
+        let marker = format!("[{}] ", index + 1);
+        let text = masked_hint(
+            &hint.text,
+            revealed[index],
+            now,
+            animations_enabled,
+            text_width,
+        );
+        let style = if revealed[index].is_some() {
+            theme.accent()
+        } else {
+            theme.dim()
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(marker, style),
+                Span::styled(
+                    text,
+                    if revealed[index].is_some() {
+                        Style::default().fg(theme.fg)
+                    } else {
+                        theme.muted()
+                    },
+                ),
+            ])),
+            Rect::new(
+                area.x,
+                area.y.saturating_add(3 + index as u16),
+                area.width,
+                1,
+            ),
+        );
+    }
 }
 
 fn render_level_progress(
