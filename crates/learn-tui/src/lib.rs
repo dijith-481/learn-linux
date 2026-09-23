@@ -34,9 +34,13 @@ use ratatui::{
 use tachyonfx::{EffectManager, Interpolation, fx};
 use thiserror::Error;
 
+mod selection;
 mod theme;
+mod typer_dojo;
 mod vim_dojo;
+use selection::{TextSelection, base64_encode};
 use theme::{Theme, ThemeId};
+use typer_dojo::TyperDojo;
 use vim_dojo::VimDojo;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +52,7 @@ enum AppMode {
     Challenges,
     Progress,
     Vim,
+    Typer,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +61,7 @@ enum PaletteCommand {
     Challenges,
     Progress,
     Vim,
+    Typer,
     ResetChallenge,
     TogglePet,
     ToggleRain,
@@ -71,7 +77,7 @@ struct PaletteEntry {
     keywords: &'static str,
 }
 
-const PALETTE_ENTRIES: [PaletteEntry; 30] = [
+const PALETTE_ENTRIES: [PaletteEntry; 31] = [
     PaletteEntry {
         command: PaletteCommand::Docs,
         label: "Search local docs",
@@ -91,6 +97,11 @@ const PALETTE_ENTRIES: [PaletteEntry; 30] = [
         command: PaletteCommand::Vim,
         label: "Open Vim dojo",
         keywords: "vim hjkl snake editing substitute game",
+    },
+    PaletteEntry {
+        command: PaletteCommand::Typer,
+        label: "Open Typer dojo",
+        keywords: "typing speed wpm linux commands facts practice",
     },
     PaletteEntry {
         command: PaletteCommand::ResetChallenge,
@@ -767,10 +778,12 @@ async fn app_loop(
     let mut pet_enabled = false;
     let mut pet = PetState::default();
     let mut keyboard = KeyboardState::default();
+    let mut selection = TextSelection::default();
     let mut rain_enabled = false;
     let mut palette_index = 0_usize;
     let mut palette_query = String::new();
     let mut vim_dojo = VimDojo::default();
+    let mut typer_dojo = TyperDojo::default();
     let mut docs_query = String::new();
     let mut docs_results = Vec::new();
     let mut progress_rows = Vec::new();
@@ -898,12 +911,14 @@ async fn app_loop(
             pet_enabled,
             &pet,
             &keyboard,
+            &mut selection,
             rain_enabled,
             animation_time,
             elapsed,
             &mut effects,
             animations_enabled,
             &vim_dojo,
+            &typer_dojo,
             theme_id.theme(),
         )?;
         if event::poll(Duration::from_millis(33)).map_err(TuiError::Io)? {
@@ -960,9 +975,8 @@ async fn app_loop(
                     if mode == AppMode::Start {
                         match key.code {
                             KeyCode::Enter | KeyCode::Char(' ') => {
-                                if start_transition.is_none() {
-                                    start_transition = Some(Duration::ZERO);
-                                }
+                                mode = AppMode::Lesson;
+                                focus = PanelFocus::Left;
                             }
                             KeyCode::Esc => break,
                             _ => {}
@@ -1020,6 +1034,10 @@ async fn app_loop(
                                             focus = PanelFocus::Left;
                                             vim_dojo.reset();
                                         }
+                                        PaletteCommand::Typer => {
+                                            mode = AppMode::Typer;
+                                            typer_dojo.reset();
+                                        }
                                         PaletteCommand::ResetChallenge => {
                                             if let Some(challenge) = selected_challenge.as_ref() {
                                                 daemon.reset_challenge(&challenge.spec.id)?;
@@ -1075,6 +1093,17 @@ async fn app_loop(
                                 }
                             }
                             _ => {}
+                        }
+                        continue;
+                    }
+                    if mode == AppMode::Typer {
+                        if key.code == KeyCode::Esc {
+                            mode = AppMode::Lesson;
+                        } else if !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                        {
+                            typer_dojo.handle_key(key.code, animation_time);
                         }
                         continue;
                     }
@@ -1284,21 +1313,47 @@ async fn app_loop(
                         _ => {}
                     }
                 }
-                Event::Mouse(mouse)
-                    if mode == AppMode::Lesson
-                        && mouse.kind == MouseEventKind::Down(MouseButton::Left) =>
-                {
-                    if let Some(index) =
-                        hint_click_index(mouse.column, mouse.row, terminal_columns, terminal_rows)
-                    {
-                        if selected_challenge
-                            .as_ref()
-                            .is_some_and(|challenge| challenge.spec.hints.get(index).is_some())
+                Event::Mouse(mouse) if mode == AppMode::Lesson => match mouse.kind {
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        if let Some(index) = hint_click_index(
+                            mouse.column,
+                            mouse.row,
+                            terminal_columns,
+                            terminal_rows,
+                        ) {
+                            if selected_challenge
+                                .as_ref()
+                                .is_some_and(|challenge| challenge.spec.hints.get(index).is_some())
+                            {
+                                revealed_hints[index] = Some(animation_time);
+                            }
+                        } else if let Some(area) =
+                            text_area_at(terminal_columns, terminal_rows, mouse.column, mouse.row)
                         {
-                            revealed_hints[index] = Some(animation_time);
+                            selection.begin(area, mouse.column, mouse.row);
+                        } else {
+                            selection.clear();
                         }
                     }
-                }
+                    MouseEventKind::Drag(MouseButton::Left) => {
+                        selection.drag(mouse.column, mouse.row)
+                    }
+                    MouseEventKind::Up(MouseButton::Left) => {
+                        if let Some(text) = selection.finish(mouse.column, mouse.row) {
+                            let mut end = text.len().min(8192);
+                            while !text.is_char_boundary(end) {
+                                end -= 1;
+                            }
+                            let payload = base64_encode(&text.as_bytes()[..end]);
+                            execute!(
+                                terminal.backend_mut(),
+                                crossterm::style::Print(format!("\x1b]52;c;{payload}\x07"))
+                            )
+                            .map_err(TuiError::Io)?;
+                        }
+                    }
+                    _ => {}
+                },
                 Event::Resize(columns, rows) => {
                     terminal_columns = columns;
                     terminal_rows = rows;
@@ -1573,12 +1628,14 @@ fn draw_ui(
     pet_enabled: bool,
     pet: &PetState,
     keyboard: &KeyboardState,
+    selection: &mut TextSelection,
     rain_enabled: bool,
     animation_time: Duration,
     elapsed: Duration,
     effects: &mut EffectManager<()>,
     animations_enabled: bool,
     vim_dojo: &VimDojo,
+    typer_dojo: &TyperDojo,
     theme: Theme,
 ) -> Result<(), TuiError> {
     terminal
@@ -1599,6 +1656,10 @@ fn draw_ui(
                     daemon.content.challenges.len(),
                     theme,
                 );
+                return;
+            }
+            if mode == AppMode::Typer {
+                typer_dojo.render(frame, area, animation_time, theme);
                 return;
             }
             if mode == AppMode::Vim && vim_dojo.is_snake() {
@@ -1711,6 +1772,9 @@ fn draw_ui(
                     theme,
                 );
             }
+            if mode == AppMode::Lesson {
+                selection.capture_and_highlight(frame, task_area, theme);
+            }
             let terminal_block = Block::default()
                 .borders(Borders::ALL)
                 .style(Style::default().bg(theme.surface))
@@ -1730,6 +1794,9 @@ fn draw_ui(
                 .scroll((terminal_scroll, 0))
                 .wrap(Wrap { trim: false });
             frame.render_widget(left, left_sections[1]);
+            if mode == AppMode::Lesson {
+                selection.capture_and_highlight(frame, panel_content_area(left_sections[1]), theme);
+            }
             if rain_enabled && mode == AppMode::Lesson {
                 render_content_rain(
                     frame,
@@ -1769,7 +1836,7 @@ fn draw_ui(
                     }
                     lines
                 }
-                AppMode::Start => Vec::new(),
+                AppMode::Start | AppMode::Typer => Vec::new(),
                 AppMode::Lesson => docs_sidebar_lines(docs_query, docs_results, theme),
             };
             let keyboard_rect = keyboard_area(columns[1], mode);
@@ -1793,6 +1860,13 @@ fn draw_ui(
                 .block(right_block)
                 .wrap(Wrap { trim: true });
             frame.render_widget(right, columns[1]);
+            if mode == AppMode::Lesson {
+                let mut docs_text = panel_content_area(columns[1]);
+                if let Some(keyboard_rect) = keyboard_rect {
+                    docs_text.height = keyboard_rect.y.saturating_sub(docs_text.y);
+                }
+                selection.capture_and_highlight(frame, docs_text, theme);
+            }
             if let Some(keyboard_rect) = keyboard_rect {
                 render_keyboard(frame, keyboard_rect, keyboard, animation_time, theme);
             }
@@ -2000,48 +2074,141 @@ fn render_start_screen(
     frame: &mut ratatui::Frame<'_>,
     area: Rect,
     time: Duration,
-    transition: Option<Duration>,
-    _challenge_count: usize,
+    _transition: Option<Duration>,
+    challenge_count: usize,
     theme: Theme,
 ) {
     frame.render_widget(
-        Block::default().style(Style::default().bg(theme.surface)),
+        Block::default().style(Style::default().bg(theme.backdrop)),
         area,
     );
     render_game_of_life(frame, area, time, theme);
+    if area.width < 84 || area.height < 19 {
+        let lines = vec![
+            Line::from(Span::styled("LEARN LINUX", theme.title())),
+            Line::from(""),
+            Line::from(Span::styled(
+                "Learn by doing, one command at a time.",
+                theme.fg,
+            )),
+            Line::from(""),
+            Line::from(Span::styled(" Enter  Start ", theme.selected())),
+            Line::from(""),
+            Line::from(Span::styled("Ctrl-Space  menu    Esc  quit", theme.dim())),
+        ];
+        frame.render_widget(
+            Paragraph::new(lines).alignment(Alignment::Center),
+            centered_rect(90, 42, area),
+        );
+        return;
+    }
 
-    let content = centered_rect(72, 74, area);
-    let action_style = if transition.is_some() {
-        theme.selected().add_modifier(Modifier::BOLD)
-    } else {
-        theme.selected()
-    };
-    let mut lines = if area.width >= 44 && area.height >= 16 {
-        let mut lines = start_word_lines("LEARN", theme.accent().add_modifier(Modifier::BOLD));
-        lines.extend(start_word_lines(
-            "LINUX",
-            Style::default().fg(theme.warn).add_modifier(Modifier::BOLD),
-        ));
-        lines
-    } else {
-        vec![Line::from(Span::styled("LEARN LINUX", theme.title()))]
-    };
-    lines.extend([
-        Line::from(Span::styled("keyboard-first shell dojo", theme.dim())),
-        Line::from(""),
-        Line::from(Span::styled("[ ENTER ]  START LEARNING", action_style)),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Vim dojo in command center  ·  Ctrl-Space commands  ·  Esc quit",
-            theme.dim(),
-        )),
-    ]);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .alignment(Alignment::Center)
-            .block(Block::default().padding(Padding::uniform(1))),
-        content,
+    let card_width = area.width.saturating_sub(6).min(92);
+    let card_height = area.height.saturating_sub(4).min(21);
+    let card = Rect::new(
+        area.x
+            .saturating_add(area.width.saturating_sub(card_width) / 2),
+        area.y
+            .saturating_add(area.height.saturating_sub(card_height) / 2),
+        card_width,
+        card_height,
     );
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(theme.muted())
+            .style(Style::default().bg(theme.surface)),
+        card,
+    );
+    let art_x = card.x.saturating_add(3);
+    let art_y = card.y.saturating_add(card.height.saturating_sub(13) / 2);
+    render_penguin_cells(frame, art_x, art_y, theme);
+
+    let text_x = card.x.saturating_add(40);
+    let text_width = card.right().saturating_sub(text_x).saturating_sub(2);
+    let text_y = card.y.saturating_add(3);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            "SHELL DOJO  /  OFFLINE",
+            theme.accent().add_modifier(Modifier::BOLD),
+        ))),
+        Rect::new(text_x, text_y, text_width, 1),
+    );
+    let mut title = start_word_lines("LINUX", theme.accent().add_modifier(Modifier::BOLD));
+    title.push(Line::from(""));
+    title.push(Line::from(Span::styled(
+        "Learn the terminal by using it.",
+        theme.fg,
+    )));
+    frame.render_widget(
+        Paragraph::new(title),
+        Rect::new(text_x, text_y.saturating_add(2), text_width, 8),
+    );
+    let action = Rect::new(text_x, text_y.saturating_add(11), text_width.min(31), 3);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(" Enter ", theme.selected().add_modifier(Modifier::BOLD)),
+            Span::styled("  Start learning  →", theme.accent()),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(theme.accent())
+                .style(Style::default().bg(theme.overlay))
+                .padding(Padding::horizontal(1)),
+        ),
+        action,
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(format!("{challenge_count} hands-on lessons"), theme.dim()),
+            Span::styled("   ·   ", theme.muted()),
+            Span::styled("Ctrl-Space  menu", theme.dim()),
+        ])),
+        Rect::new(text_x, card.bottom().saturating_sub(3), text_width, 1),
+    );
+}
+
+fn render_penguin_cells(frame: &mut ratatui::Frame<'_>, x: u16, y: u16, theme: Theme) {
+    // Each pixel is a pair of background-colored cells: detailed art, no copyable glyphs.
+    const PIXELS: [&str; 13] = [
+        "00000011111000000",
+        "00001111111110000",
+        "00011111111111000",
+        "00111111111111100",
+        "01111111111111110",
+        "01111211121111110",
+        "11112222222221111",
+        "11122222322222111",
+        "11122222222222111",
+        "01112222222221110",
+        "00111222222211100",
+        "00001114411110000",
+        "00000444044400000",
+    ];
+    let colors = [
+        theme.surface,
+        theme.overlay,
+        theme.fg,
+        theme.warn,
+        theme.warn,
+    ];
+    for (row, pixels) in PIXELS.iter().enumerate() {
+        for (column, pixel) in pixels.bytes().enumerate() {
+            if pixel == b'0' {
+                continue;
+            }
+            let color = colors[usize::from(pixel - b'0')];
+            for half in 0..2 {
+                if let Some(cell) = frame.buffer_mut().cell_mut((
+                    x.saturating_add(u16::try_from(column * 2 + half).unwrap_or(0)),
+                    y.saturating_add(u16::try_from(row).unwrap_or(0)),
+                )) {
+                    cell.set_symbol(" ").set_bg(color);
+                }
+            }
+        }
+    }
 }
 
 fn render_game_of_life(frame: &mut ratatui::Frame<'_>, area: Rect, time: Duration, theme: Theme) {
@@ -2552,6 +2719,31 @@ fn brief_height(rows: u16) -> u16 {
     } else {
         9
     }
+}
+
+fn text_area_at(columns: u16, rows: u16, x: u16, y: u16) -> Option<Rect> {
+    let right_width = if columns >= 118 {
+        (columns.saturating_mul(28) / 100).max(52)
+    } else {
+        columns.saturating_mul(28) / 100
+    };
+    let left_width = columns.saturating_sub(right_width);
+    let brief = brief_height(rows);
+    let task = Rect::new(2, 1, left_width.saturating_sub(4), brief.saturating_sub(4));
+    let terminal = Rect::new(
+        1,
+        brief.saturating_add(2),
+        left_width.saturating_sub(2),
+        rows.saturating_sub(brief).saturating_sub(3),
+    );
+    let sidebar = Rect::new(left_width, 0, right_width, rows);
+    let mut docs = panel_content_area(sidebar);
+    if let Some(keyboard) = keyboard_area(sidebar, AppMode::Lesson) {
+        docs.height = keyboard.y.saturating_sub(docs.y);
+    }
+    [task, terminal, docs]
+        .into_iter()
+        .find(|area| area.contains((x, y).into()))
 }
 
 fn hint_click_index(column: u16, row: u16, columns: u16, rows: u16) -> Option<usize> {
@@ -3273,11 +3465,12 @@ mod tests {
     #[test]
     fn command_palette_searches_without_stealing_shell_keys() {
         assert_eq!(palette_matches("vim"), vec![3]);
-        assert_eq!(palette_matches("restart"), vec![4]);
+        assert_eq!(palette_matches("typer"), vec![4]);
+        assert_eq!(palette_matches("restart"), vec![5]);
         assert_eq!(palette_matches("ch"), vec![1]);
-        assert_eq!(palette_matches("pet"), vec![5]);
-        assert_eq!(palette_matches("rain"), vec![6]);
-        assert_eq!(palette_matches("reastart"), vec![4]);
+        assert_eq!(palette_matches("pet"), vec![6]);
+        assert_eq!(palette_matches("rain"), vec![7]);
+        assert_eq!(palette_matches("reastart"), vec![5]);
         assert_eq!(palette_matches("vmi"), vec![3]);
         assert!(app_leader(KeyCode::Char(' '), KeyModifiers::CONTROL));
         assert!(!app_leader(KeyCode::Char(' '), KeyModifiers::NONE));
