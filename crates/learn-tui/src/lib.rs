@@ -3,8 +3,9 @@
 
 //! Beginner-first full-screen client.
 
-use std::io::{self, Read, Stdout};
+use std::io::{self, Read, Stdout, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -985,6 +986,14 @@ async fn app_loop(
                                 mode = AppMode::Lesson;
                                 focus = PanelFocus::Left;
                             }
+                            KeyCode::Char('v' | 'V') => {
+                                mode = AppMode::Vim;
+                                vim_dojo.reset();
+                            }
+                            KeyCode::Char('t' | 'T') => {
+                                mode = AppMode::Typer;
+                                typer_dojo.reset();
+                            }
                             KeyCode::Esc => break,
                             _ => {}
                         }
@@ -1366,6 +1375,20 @@ async fn app_loop(
                                 crossterm::style::Print(format!("\x1b]52;c;{payload}\x07"))
                             )
                             .map_err(TuiError::Io)?;
+                            // OSC 52 covers remote terminals; Wayland is a local fallback.
+                            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                                if let Ok(mut copy) = Command::new("wl-copy")
+                                    .stdin(Stdio::piped())
+                                    .stdout(Stdio::null())
+                                    .stderr(Stdio::null())
+                                    .spawn()
+                                {
+                                    if let Some(mut input) = copy.stdin.take() {
+                                        let _ = input.write_all(text.as_bytes());
+                                    }
+                                    let _ = copy.wait();
+                                }
+                            }
                         }
                     }
                     _ => {}
@@ -2189,7 +2212,7 @@ fn render_start_screen(
         Paragraph::new(Line::from(vec![
             Span::styled(format!("{challenge_count} lessons"), theme.dim()),
             Span::styled("   ·   ", theme.muted()),
-            Span::styled("Vim + Typer inside", theme.dim()),
+            Span::styled("V Vim   T Typer", theme.dim()),
         ])),
         Rect::new(text_x, card.bottom().saturating_sub(3), text_width, 1),
     );
