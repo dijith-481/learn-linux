@@ -5,7 +5,10 @@
 
 mod wasm;
 
-pub use wasm::{WASM_GUEST_ABI_VERSION, WasmSession, start_wasm_session, wasm_bundle_version};
+pub use wasm::{
+    WASM_GUEST_ABI_VERSION, WasmSession, start_wasm_session, start_wasm_session_quiet,
+    wasm_bundle_version,
+};
 
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as FmtWrite};
@@ -100,7 +103,11 @@ impl DoctorReport {
             let marker = if check.ok { "[OK]" } else { "[FAIL]" };
             let _ = writeln!(output, "{marker} WASM lesson runtime: {}", check.detail);
         }
-        let _ = writeln!(output, "[OK] Linux kernel: {}", self.kernel);
+        if self.os == "linux" {
+            let _ = writeln!(output, "[OK] Linux kernel: {}", self.kernel);
+        } else {
+            let _ = writeln!(output, "[OK] Host OS: {}", self.os);
+        }
         if let Some(version) = &self.bubblewrap_version {
             let _ = writeln!(
                 output,
@@ -828,14 +835,22 @@ fn apply_setup(home: &Path, setup: &[SetupAction]) -> Result<(), RuntimeError> {
             }
             SetupAction::SetMode { path, mode } => {
                 let destination = host_path(home, path)?;
-                let mut permissions = fs::metadata(&destination)
+                let permissions = fs::metadata(&destination)
                     .map_err(RuntimeError::Io)?
                     .permissions();
                 #[cfg(unix)]
-                {
+                let permissions = {
+                    let mut permissions = permissions;
                     use std::os::unix::fs::PermissionsExt;
                     permissions.set_mode(*mode);
-                }
+                    permissions
+                };
+                #[cfg(not(unix))]
+                let permissions = {
+                    let mut permissions = permissions;
+                    permissions.set_readonly(*mode & 0o222 == 0);
+                    permissions
+                };
                 fs::set_permissions(destination, permissions).map_err(RuntimeError::Io)?;
             }
         }
@@ -872,6 +887,23 @@ fn verify_expression(
             verify_expression(home, working_directory, read_files, child).map(|value| !value)
         }
         VerifierExpr::Predicate(predicate) => match predicate {
+            VerifierPredicate::FileMode { path, mode } => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let permissions = fs::metadata(host_path(home, path)?)
+                        .map_err(RuntimeError::Io)?
+                        .permissions();
+                    Ok(permissions.mode() & 0o777 == *mode)
+                }
+                #[cfg(not(unix))]
+                {
+                    let _ = (path, mode);
+                    Err(RuntimeError::Unavailable(
+                        "native file-mode verification requires Unix".to_owned(),
+                    ))
+                }
+            }
             VerifierPredicate::PathExists(path) => Ok(host_path(home, path)?.exists()),
             VerifierPredicate::PathMissing(path) => Ok(!host_path(home, path)?.exists()),
             VerifierPredicate::FileContains { path, needle } => {

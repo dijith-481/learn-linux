@@ -2186,7 +2186,7 @@ fn render_start_screen(
     let mut title = start_word_lines("LINUX", theme.accent().add_modifier(Modifier::BOLD));
     title.push(Line::from(""));
     title.push(Line::from(Span::styled(
-        "A real shell. Small challenges.",
+        "Help bring the Northstar relay back online.",
         theme.fg,
     )));
     frame.render_widget(
@@ -2210,7 +2210,7 @@ fn render_start_screen(
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{challenge_count} lessons"), theme.dim()),
+            Span::styled(format!("{challenge_count} relay missions"), theme.dim()),
             Span::styled("   ·   ", theme.muted()),
             Span::styled("V Vim   T Typer", theme.dim()),
         ])),
@@ -2469,12 +2469,12 @@ fn render_legacy_start_screen(
                 .add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
-            "FIRST BOOT  /  FOUNDATION",
+            "NORTHSTAR RELAY  /  FIRST SHIFT",
             Style::default().fg(Color::Yellow),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "10 quests  •  1 skill graph  •  ∞ tiny victories",
+            format!("{challenge_count} missions  •  6 chapters  •  practical Linux"),
             Style::default().fg(Color::Gray),
         )),
         Line::from(""),
@@ -2484,7 +2484,7 @@ fn render_legacy_start_screen(
         )),
         start_progress_line(0, challenge_count.max(1), mission_width.min(22)),
         Line::from(Span::styled(
-            "[01] Orientation  →  [02] Files  →  [03] Search",
+            "[01] Read  →  [02] Navigate  →  [03] Create",
             Style::default().fg(Color::LightGreen),
         )),
         Line::from(""),
@@ -3635,7 +3635,7 @@ mod tests {
             body: Some(envelope::Body::Event(learn_protocol::Event {
                 kind: Some(protocol_event::Kind::ChallengeState(
                     learn_protocol::ChallengeStateEvent {
-                        challenge_id: "foundation.orientation".to_owned(),
+                        challenge_id: "relay.01".to_owned(),
                         state: "completed".to_owned(),
                     },
                 )),

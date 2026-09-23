@@ -1,0 +1,2571 @@
+// Northstar Relay: 54 snapshots of one escalating recovery story.
+// Each lesson is a fresh virtual home; the numbered missions preserve the narrative.
+// Every canonical solution is exercised by `learn content simulate --all`.
+
+challenge "relay.01" version=1 {
+    title "The First Message"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        teaches "relay.step.01"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+        }
+    }
+    objective {
+        text "The Northstar relay has gone quiet. Read the welcome message in welcome.txt."
+    }
+    setup {
+        write "~/welcome.txt" {
+            text "Northstar relay: night shift begins.\n"
+        }
+    }
+    verify {
+        all {
+            file-read "~/welcome.txt" "Northstar relay: night shift begins."
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The message is already in a file. You only need to display it."
+        }
+        hint level=2 {
+            text "Look for the FILE argument. Run man cat or cat --help for syntax."
+        }
+    }
+    solution {
+        concept "cat sends a file's contents to the terminal."
+        command "cat ~/welcome.txt"
+    }
+}
+
+challenge "relay.02" version=1 {
+    title "Find the Console"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.01"
+        teaches "relay.step.02"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cd"
+        }
+    }
+    objective {
+        text "Move into the console folder where the relay controls are kept."
+    }
+    setup {
+        mkdir "~/console"
+    }
+    verify {
+        all {
+            cwd "~/console"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Moving between folders changes your current working directory."
+        }
+        hint level=2 {
+            text "The console folder is inside your home. Run man cd or cd --help for syntax."
+        }
+    }
+    solution {
+        concept "cd changes the shell's current directory."
+        command "cd ~/console"
+    }
+}
+
+challenge "relay.03" version=1 {
+    title "Make an Inbox"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.02"
+        teaches "relay.step.03"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mkdir"
+        }
+    }
+    objective {
+        text "Create an inbox folder in your home for incoming shift notes."
+    }
+    verify {
+        all {
+            file-exists "~/inbox"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "You need a folder, not a file."
+        }
+        hint level=2 {
+            text "Give mkdir the new folder's path. Run man mkdir or mkdir --help for syntax."
+        }
+    }
+    solution {
+        concept "mkdir creates a directory at the path you name."
+        command "mkdir ~/inbox"
+    }
+}
+
+challenge "relay.04" version=1 {
+    title "Open a Shift Log"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.03"
+        teaches "relay.step.04"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "touch"
+        }
+    }
+    objective {
+        text "Create an empty file named shift.txt inside the inbox folder."
+    }
+    setup {
+        mkdir "~/inbox"
+    }
+    verify {
+        all {
+            file-equals "~/inbox/shift.txt" ""
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The inbox exists already; add an empty file inside it."
+        }
+        hint level=2 {
+            text "The full path includes both inbox and shift.txt. Run man touch or touch --help for syntax."
+        }
+    }
+    solution {
+        concept "touch creates an empty file without writing text."
+        command "touch ~/inbox/shift.txt"
+    }
+}
+
+challenge "relay.05" version=1 {
+    title "Mark the Console Ready"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.04"
+        teaches "relay.step.05"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "printf"
+        }
+    }
+    objective {
+        text "Save the word ready in a new file named status.txt in your home."
+    }
+    verify {
+        all {
+            file-equals "~/status.txt" "ready"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Produce the word, then send it into a file."
+        }
+        hint level=2 {
+            text "The > operator saves output instead of printing it. Run man printf or printf --help for syntax."
+        }
+    }
+    solution {
+        concept "Redirection writes command output into a file."
+        command "printf ready > ~/status.txt"
+    }
+}
+
+challenge "relay.06" version=1 {
+    title "Read the Handoff"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.05"
+        teaches "relay.step.06"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+        }
+    }
+    objective {
+        text "Read handoff.txt to learn what the previous operator found."
+    }
+    setup {
+        write "~/handoff.txt" {
+            text "Power is stable. The antenna is not.\n"
+        }
+    }
+    verify {
+        all {
+            file-read "~/handoff.txt" "The antenna is not."
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The handoff already exists. Reading it is the goal."
+        }
+        hint level=2 {
+            text "Point cat at handoff.txt. Run man cat or cat --help for syntax."
+        }
+    }
+    solution {
+        concept "Reading a file reveals information without changing it."
+        command "cat ~/handoff.txt"
+    }
+}
+
+challenge "relay.07" version=1 {
+    title "Keep a Spare Map"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.06"
+        teaches "relay.step.07"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cp"
+        }
+    }
+    objective {
+        text "Copy map.txt into the backup folder, keeping the original in place."
+    }
+    setup {
+        mkdir "~/backup"
+        write "~/map.txt" {
+            text "antenna -> ridge\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/backup/map.txt" "antenna -> ridge\n"
+            file-equals "~/map.txt" "antenna -> ridge\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "This needs a copy: the original map must remain."
+        }
+        hint level=2 {
+            text "The source comes first and the backup folder second. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "cp makes another file without removing the source."
+        command "cp ~/map.txt ~/backup/"
+    }
+}
+
+challenge "relay.08" version=1 {
+    title "Correct the Label"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.07"
+        teaches "relay.step.08"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mv"
+        }
+    }
+    objective {
+        text "Rename misnamed.txt to antenna.txt so the crew can find it."
+    }
+    setup {
+        write "~/misnamed.txt" {
+            text "ridge antenna\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/antenna.txt" "ridge antenna\n"
+            file-missing "~/misnamed.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "A move can also give one file a new name."
+        }
+        hint level=2 {
+            text "Put the old name first and the new name second. Run man mv or mv --help for syntax."
+        }
+    }
+    solution {
+        concept "mv changes a file's path or name."
+        command "mv ~/misnamed.txt ~/antenna.txt"
+    }
+}
+
+challenge "relay.09" version=1 {
+    title "Clear the Desk"
+    summary "First Shift — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 3
+    skills {
+        requires "relay.step.08"
+        teaches "relay.step.09"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "rm"
+            allow "touch"
+        }
+    }
+    objective {
+        text "Remove stale.txt, then create an empty ready.txt in the inbox."
+    }
+    setup {
+        mkdir "~/inbox"
+        write "~/stale.txt" {
+            text "old note"
+        }
+    }
+    verify {
+        all {
+            file-missing "~/stale.txt"
+            file-equals "~/inbox/ready.txt" ""
+        }
+    }
+    hints {
+        hint level=1 {
+            text "This is two separate actions: discard one file and create another."
+        }
+        hint level=2 {
+            text "Check the filename carefully before removing it. Run man rm or rm --help for syntax."
+        }
+    }
+    solution {
+        concept "Small shell tasks often combine safe removal with creation."
+        command "rm ~/stale.txt"
+        command "touch ~/inbox/ready.txt"
+    }
+}
+
+challenge "relay.10" version=1 {
+    title "Build the Feed Path"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.09"
+        teaches "relay.step.10"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mkdir"
+        }
+    }
+    objective {
+        text "Create the nested folders relay/feeds/night in your home."
+    }
+    verify {
+        all {
+            file-exists "~/relay/feeds/night"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The parent folders do not exist yet."
+        }
+        hint level=2 {
+            text "The -p option builds missing parents in one command. Run man mkdir or mkdir --help for syntax."
+        }
+    }
+    solution {
+        concept "mkdir -p creates an entire missing directory path."
+        command "mkdir -p ~/relay/feeds/night"
+    }
+}
+
+challenge "relay.11" version=1 {
+    title "Enter the Feed Room"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.10"
+        teaches "relay.step.11"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cd"
+        }
+    }
+    objective {
+        text "Move into relay/feeds/night so commands run from the feed room."
+    }
+    setup {
+        mkdir "~/relay"
+        mkdir "~/relay/feeds"
+        mkdir "~/relay/feeds/night"
+    }
+    verify {
+        all {
+            cwd "~/relay/feeds/night"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The nested folders are already present."
+        }
+        hint level=2 {
+            text "You can use a path starting with ~/ from any location. Run man cd or cd --help for syntax."
+        }
+    }
+    solution {
+        concept "A path beginning with ~ starts at your home."
+        command "cd ~/relay/feeds/night"
+    }
+}
+
+challenge "relay.12" version=1 {
+    title "Three Empty Channels"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.11"
+        teaches "relay.step.12"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "touch"
+        }
+    }
+    objective {
+        text "Create empty channel1.txt, channel2.txt, and channel3.txt in signals."
+    }
+    setup {
+        mkdir "~/signals"
+    }
+    verify {
+        all {
+            file-equals "~/signals/channel1.txt" ""
+            file-equals "~/signals/channel2.txt" ""
+            file-equals "~/signals/channel3.txt" ""
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The files share the same name except for their number."
+        }
+        hint level=2 {
+            text "The shell expands {1..3} into three numbers. Run man touch or touch --help for syntax."
+        }
+    }
+    solution {
+        concept "Brace expansion generates several filenames before touch runs."
+        command "touch ~/signals/channel{1..3}.txt"
+    }
+}
+
+challenge "relay.13" version=1 {
+    title "Copy a Signal Sample"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.12"
+        teaches "relay.step.13"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cp"
+        }
+    }
+    objective {
+        text "Copy sample.txt into the review folder without deleting the source."
+    }
+    setup {
+        mkdir "~/review"
+        write "~/sample.txt" {
+            text "signal 42\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/review/sample.txt" "signal 42\n"
+            file-equals "~/sample.txt" "signal 42\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The review folder already exists; keep the original."
+        }
+        hint level=2 {
+            text "A trailing slash makes the folder destination clear. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "Copying leaves the source untouched."
+        command "cp ~/sample.txt ~/review/"
+    }
+}
+
+challenge "relay.14" version=1 {
+    title "Gather the Logs"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.13"
+        teaches "relay.step.14"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cp"
+        }
+    }
+    objective {
+        text "Copy every .log file from feeds to backup, but leave readme.txt behind."
+    }
+    setup {
+        mkdir "~/backup"
+        mkdir "~/feeds"
+        write "~/feeds/a.log" {
+            text "A\n"
+        }
+        write "~/feeds/b.log" {
+            text "B\n"
+        }
+        write "~/feeds/readme.txt" {
+            text "notes\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/backup/a.log" "A\n"
+            file-equals "~/backup/b.log" "B\n"
+            file-missing "~/backup/readme.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The files you want share one extension."
+        }
+        hint level=2 {
+            text "*.log matches any filename ending in .log. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "A glob lets one command act on a family of files."
+        command "cp ~/feeds/*.log ~/backup/"
+    }
+}
+
+challenge "relay.15" version=1 {
+    title "Move the Crate"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.14"
+        teaches "relay.step.15"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mv"
+        }
+    }
+    objective {
+        text "Move the parts folder and everything inside it into storage."
+    }
+    setup {
+        mkdir "~/parts"
+        mkdir "~/storage"
+        write "~/parts/fuse.txt" {
+            text "spare\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/storage/parts/fuse.txt" "spare\n"
+            file-missing "~/parts"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Moving a folder also moves its contents."
+        }
+        hint level=2 {
+            text "Use storage as the destination folder. Run man mv or mv --help for syntax."
+        }
+    }
+    solution {
+        concept "mv can relocate a directory tree."
+        command "mv ~/parts ~/storage/"
+    }
+}
+
+challenge "relay.16" version=1 {
+    title "Discard a Bad Reading"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.15"
+        teaches "relay.step.16"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "rm"
+        }
+    }
+    objective {
+        text "Remove bad.txt from samples while keeping good.txt."
+    }
+    setup {
+        mkdir "~/samples"
+        write "~/samples/bad.txt" {
+            text "noise\n"
+        }
+        write "~/samples/good.txt" {
+            text "steady\n"
+        }
+    }
+    verify {
+        all {
+            file-missing "~/samples/bad.txt"
+            file-equals "~/samples/good.txt" "steady\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Only one sample is wrong."
+        }
+        hint level=2 {
+            text "Name bad.txt exactly; good.txt must remain. Run man rm or rm --help for syntax."
+        }
+    }
+    solution {
+        concept "Removal is precise when you name a single file."
+        command "rm ~/samples/bad.txt"
+    }
+}
+
+challenge "relay.17" version=1 {
+    title "Locate the Beacon"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.16"
+        teaches "relay.step.17"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "find"
+        }
+    }
+    objective {
+        text "Find beacon.txt somewhere under archive, then read its message."
+    }
+    setup {
+        mkdir "~/archive"
+        mkdir "~/archive/2025"
+        mkdir "~/archive/2026"
+        mkdir "~/archive/old"
+        mkdir "~/archive/2026/ridge"
+        write "~/archive/old/map.txt" {
+            text "map\n"
+        }
+        write "~/archive/2026/ridge/beacon.txt" {
+            text "Beacon at ridge 7.\n"
+        }
+        write "~/archive/2025/beacon.log" {
+            text "old\n"
+        }
+    }
+    verify {
+        all {
+            file-read "~/archive/2026/ridge/beacon.txt" "Beacon at ridge 7."
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The name is known, but the folder is not."
+        }
+        hint level=2 {
+            text "Search archive by the exact filename, then read the result. Run man find or find --help for syntax."
+        }
+    }
+    solution {
+        concept "find locates a path; cat opens the file it found."
+        command "find ~/archive -name beacon.txt"
+        command "cat ~/archive/2026/ridge/beacon.txt"
+    }
+}
+
+challenge "relay.18" version=1 {
+    title "Tidy the Workbench"
+    summary "Finding Signal — repair the Northstar relay."
+    difficulty "beginner"
+    estimated-minutes 4
+    skills {
+        requires "relay.step.17"
+        teaches "relay.step.18"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "mv"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Move draft.txt into finished, then remove the empty scratch note."
+    }
+    setup {
+        mkdir "~/finished"
+        write "~/draft.txt" {
+            text "checked\n"
+        }
+        write "~/scratch.txt" {
+            text ""
+        }
+    }
+    verify {
+        all {
+            file-equals "~/finished/draft.txt" "checked\n"
+            file-missing "~/draft.txt"
+            file-missing "~/scratch.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "One file should be kept in a new place; the other should go."
+        }
+        hint level=2 {
+            text "Finish the move before removing scratch.txt. Run man mv or mv --help for syntax."
+        }
+    }
+    solution {
+        concept "Combining move and remove keeps useful work while clearing clutter."
+        command "mv ~/draft.txt ~/finished/"
+        command "rm ~/scratch.txt"
+    }
+}
+
+challenge "relay.19" version=1 {
+    title "Spot the Alarm"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.18"
+        teaches "relay.step.19"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+        }
+    }
+    objective {
+        text "Save the line containing ALERT from radio.log into alarm.txt."
+    }
+    setup {
+        write "~/radio.log" {
+            text "INFO link up\nALERT weak signal\nINFO retry\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/alarm.txt" "ALERT weak signal\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Search the log for one word rather than reading every line."
+        }
+        hint level=2 {
+            text "Send grep's matching line to alarm.txt with >. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "grep filters input lines by text."
+        command "grep ALERT ~/radio.log > ~/alarm.txt"
+    }
+}
+
+challenge "relay.20" version=1 {
+    title "Read the Beginning"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.19"
+        teaches "relay.step.20"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "head"
+        }
+    }
+    objective {
+        text "Save the first ten lines of a twelve-line boot log in start.txt."
+    }
+    setup {
+        write "~/boot.log" {
+            text "L01\nL02\nL03\nL04\nL05\nL06\nL07\nL08\nL09\nL10\nL11\nL12\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/start.txt" "L01\nL02\nL03\nL04\nL05\nL06\nL07\nL08\nL09\nL10\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The beginning of the log is what matters."
+        }
+        hint level=2 {
+            text "This shell's head prints ten lines. Run man head or head --help for syntax."
+        }
+    }
+    solution {
+        concept "head takes the first ten lines of a file or stream."
+        command "head ~/boot.log > ~/start.txt"
+    }
+}
+
+challenge "relay.21" version=1 {
+    title "Read the End"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.20"
+        teaches "relay.step.21"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "tail"
+        }
+    }
+    objective {
+        text "Save the last ten lines of a twelve-line boot log in end.txt."
+    }
+    setup {
+        write "~/boot.log" {
+            text "L01\nL02\nL03\nL04\nL05\nL06\nL07\nL08\nL09\nL10\nL11\nL12\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/end.txt" "L03\nL04\nL05\nL06\nL07\nL08\nL09\nL10\nL11\nL12\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The newest entries are at the end."
+        }
+        hint level=2 {
+            text "This shell's tail prints the final ten lines. Run man tail or tail --help for syntax."
+        }
+    }
+    solution {
+        concept "tail keeps the last ten lines of a file or stream."
+        command "tail ~/boot.log > ~/end.txt"
+    }
+}
+
+challenge "relay.22" version=1 {
+    title "Add a Repair Note"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.21"
+        teaches "relay.step.22"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "echo"
+        }
+    }
+    objective {
+        text "Append repaired to the existing maintenance log without erasing its first line."
+    }
+    setup {
+        write "~/maintenance.log" {
+            text "checked\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/maintenance.log" "checked\nrepaired\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The old entry must remain."
+        }
+        hint level=2 {
+            text "Use >> to append, not > to replace. Run man echo or echo --help for syntax."
+        }
+    }
+    solution {
+        concept "Append redirection adds output after existing contents."
+        command "echo repaired >> ~/maintenance.log"
+    }
+}
+
+challenge "relay.23" version=1 {
+    title "Pass the Message Along"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.22"
+        teaches "relay.step.23"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "grep"
+        }
+    }
+    objective {
+        text "Read chatter.txt, keep only the READY line, and save it in ready.txt."
+    }
+    setup {
+        write "~/chatter.txt" {
+            text "WAIT\nREADY antenna\nNOISE\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/ready.txt" "READY antenna\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "One tool reads the file; another keeps the line you need."
+        }
+        hint level=2 {
+            text "A pipe joins their output and input; > saves the result. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "Pipes compose simple commands into a useful chain."
+        command "cat ~/chatter.txt | grep READY > ~/ready.txt"
+    }
+}
+
+challenge "relay.24" version=1 {
+    title "Measure a Signal"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.23"
+        teaches "relay.step.24"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "wc"
+        }
+    }
+    objective {
+        text "Count the bytes in ping.txt and save the number in bytes.txt."
+    }
+    setup {
+        write "~/ping.txt" {
+            text "PING"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/bytes.txt" "4\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Count the bytes after reading the file into a stream."
+        }
+        hint level=2 {
+            text "Use a pipe so wc receives the file contents. Run man wc or wc --help for syntax."
+        }
+    }
+    solution {
+        concept "In this lesson shell, wc counts bytes from standard input."
+        command "cat ~/ping.txt | wc > ~/bytes.txt"
+    }
+}
+
+challenge "relay.25" version=1 {
+    title "Put Calls in Order"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.24"
+        teaches "relay.step.25"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "sort"
+        }
+    }
+    objective {
+        text "Sort the call signs in calls.txt and save the ordered lines in ordered.txt."
+    }
+    setup {
+        write "~/calls.txt" {
+            text "ZULU\nALPHA\nMIKE\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/ordered.txt" "ALPHA\nMIKE\nZULU\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The names are correct but out of order."
+        }
+        hint level=2 {
+            text "Save the sorted output in a separate file. Run man sort or sort --help for syntax."
+        }
+    }
+    solution {
+        concept "sort arranges lines alphabetically."
+        command "sort ~/calls.txt > ~/ordered.txt"
+    }
+}
+
+challenge "relay.26" version=1 {
+    title "Drop Consecutive Echoes"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.25"
+        teaches "relay.step.26"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "uniq"
+        }
+    }
+    objective {
+        text "Remove repeated neighboring lines from echoes.txt and save the result."
+    }
+    setup {
+        write "~/echoes.txt" {
+            text "ONE\nONE\nTWO\nTWO\nTHREE\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/clean.txt" "ONE\nTWO\nTHREE\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Each repeated reading sits next to its twin."
+        }
+        hint level=2 {
+            text "uniq removes adjacent duplicates, not every duplicate anywhere. Run man uniq or uniq --help for syntax."
+        }
+    }
+    solution {
+        concept "uniq collapses consecutive equal lines."
+        command "uniq ~/echoes.txt > ~/clean.txt"
+    }
+}
+
+challenge "relay.27" version=1 {
+    title "One of Each"
+    summary "Sorting Noise — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 5
+    skills {
+        requires "relay.step.26"
+        teaches "relay.step.27"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "sort"
+            allow "uniq"
+        }
+    }
+    objective {
+        text "Make a list of each unique channel in channels.txt, in alphabetical order."
+    }
+    setup {
+        write "~/channels.txt" {
+            text "blue\nred\nblue\ngreen\nred\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/unique.txt" "blue\ngreen\nred\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The duplicates are separated, so uniq alone will not finish the job."
+        }
+        hint level=2 {
+            text "Sort first to bring equal lines together, then use uniq. Run man sort or sort --help for syntax."
+        }
+    }
+    solution {
+        concept "Sorting before uniq removes duplicates across the whole file."
+        command "sort ~/channels.txt | uniq > ~/unique.txt"
+    }
+}
+
+challenge "relay.28" version=1 {
+    title "Seal a Private Note"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.27"
+        teaches "relay.step.28"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Set private.txt so only its owner can read and write it (mode 600)."
+    }
+    setup {
+        write "~/private.txt" {
+            text "crew only\n"
+        }
+    }
+    verify {
+        all {
+            file-mode "~/private.txt" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The first permission digit is the owner; the others are group and everyone else."
+        }
+        hint level=2 {
+            text "A mode of 600 gives the owner read and write. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Octal modes encode owner, group, and other permissions."
+        command "chmod 600 ~/private.txt"
+    }
+}
+
+challenge "relay.29" version=1 {
+    title "Make a Tool Executable"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.28"
+        teaches "relay.step.29"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Add owner execute permission to runme.sh, keeping its other permissions."
+    }
+    setup {
+        write "~/runme.sh" {
+            text "echo ready\n"
+        }
+    }
+    verify {
+        all {
+            file-mode "~/runme.sh" "744"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Change only the owner's execute bit."
+        }
+        hint level=2 {
+            text "The symbolic form u+x adds execute permission for the owner. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Symbolic chmod can change one permission without replacing the rest."
+        command "chmod u+x ~/runme.sh"
+    }
+}
+
+challenge "relay.30" version=1 {
+    title "Keep the Report Private"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.29"
+        teaches "relay.step.30"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Remove group and other read access from report.txt."
+    }
+    setup {
+        write "~/report.txt" {
+            text "sensitive\n"
+        }
+    }
+    verify {
+        all {
+            file-mode "~/report.txt" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The file starts readable by others."
+        }
+        hint level=2 {
+            text "g and o mean group and other; -r removes read access. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "A symbolic subtraction removes selected permission bits."
+        command "chmod go-r ~/report.txt"
+    }
+}
+
+challenge "relay.31" version=1 {
+    title "Share with the Team"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.30"
+        teaches "relay.step.31"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Set team.txt to mode 640: owner can edit, group can read, others cannot."
+    }
+    setup {
+        write "~/team.txt" {
+            text "shift plan\n"
+        }
+    }
+    verify {
+        all {
+            file-mode "~/team.txt" "640"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Think of each octal digit as a separate audience."
+        }
+        hint level=2 {
+            text "Owner needs 6, group needs 4, and other needs 0. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Mode 640 is a common owner-write, group-read setting."
+        command "chmod 640 ~/team.txt"
+    }
+}
+
+challenge "relay.32" version=1 {
+    title "Lock the Key"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.31"
+        teaches "relay.step.32"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Use symbolic permissions to make key.txt owner read/write only."
+    }
+    setup {
+        write "~/key.txt" {
+            text "northstar\n"
+        }
+    }
+    verify {
+        all {
+            file-mode "~/key.txt" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "An equals sign replaces permissions for the named audience."
+        }
+        hint level=2 {
+            text "Set owner to rw and group/other to nothing. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Symbolic equals sets an exact class of permissions."
+        command "chmod u=rw,go= ~/key.txt"
+    }
+}
+
+challenge "relay.33" version=1 {
+    title "Recover a Sealed File"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.32"
+        teaches "relay.step.33"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Restore owner read access to sealed.txt, then read its message."
+    }
+    setup {
+        write "~/sealed.txt" {
+            text "Backup frequency: 73.\n"
+        }
+        mode "~/sealed.txt" 0
+    }
+    verify {
+        all {
+            file-mode "~/sealed.txt" "400"
+            file-read "~/sealed.txt" "Backup frequency: 73."
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The file exists but has no readable permission."
+        }
+        hint level=2 {
+            text "Add owner read with u+r before using cat. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Permissions affect whether file contents can be read."
+        command "chmod u+r ~/sealed.txt"
+        command "cat ~/sealed.txt"
+    }
+}
+
+challenge "relay.34" version=1 {
+    title "Find the Locked Key"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.33"
+        teaches "relay.step.34"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "stat"
+        }
+    }
+    objective {
+        text "Inspect the keys, then give locked.key owner read/write access."
+    }
+    setup {
+        mkdir "~/keys"
+        write "~/keys/locked.key" {
+            text "supply token\n"
+        }
+        write "~/keys/open.key" {
+            text "public\n"
+        }
+        mode "~/keys/locked.key" 0
+    }
+    verify {
+        all {
+            file-mode "~/keys/locked.key" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "One key has mode 000; inspect before changing it."
+        }
+        hint level=2 {
+            text "stat shows a file's octal mode in this shell. Run man stat or stat --help for syntax."
+        }
+    }
+    solution {
+        concept "Inspecting state first makes permission changes deliberate."
+        command "stat ~/keys/locked.key"
+        command "chmod 600 ~/keys/locked.key"
+    }
+}
+
+challenge "relay.35" version=1 {
+    title "Protect the Spare"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.34"
+        teaches "relay.step.35"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+        }
+    }
+    objective {
+        text "Copy config.txt into backup, then set the copy to owner-only mode 600."
+    }
+    setup {
+        mkdir "~/backup"
+        write "~/config.txt" {
+            text "channel=73\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/backup/config.txt" "channel=73\n"
+            file-mode "~/backup/config.txt" "600"
+            file-mode "~/config.txt" "644"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The original should keep its current permissions."
+        }
+        hint level=2 {
+            text "Change the mode on the copy after making it. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "Copies can be secured separately from their source."
+        command "cp ~/config.txt ~/backup/"
+        command "chmod 600 ~/backup/config.txt"
+    }
+}
+
+challenge "relay.36" version=1 {
+    title "Two Different Audiences"
+    summary "Permissions — repair the Northstar relay."
+    difficulty "intermediate"
+    estimated-minutes 6
+    skills {
+        requires "relay.step.35"
+        teaches "relay.step.36"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+        }
+    }
+    objective {
+        text "Make crew.txt owner-only (600) and bulletin.txt readable by everyone (644)."
+    }
+    setup {
+        write "~/crew.txt" {
+            text "private\n"
+        }
+        write "~/bulletin.txt" {
+            text "public\n"
+        }
+        mode "~/bulletin.txt" 384
+    }
+    verify {
+        all {
+            file-mode "~/crew.txt" "600"
+            file-mode "~/bulletin.txt" "644"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "These two files need different audiences."
+        }
+        hint level=2 {
+            text "Check each target separately with stat if unsure. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Permission choices should match the contents of each file."
+        command "chmod 600 ~/crew.txt"
+        command "chmod 644 ~/bulletin.txt"
+    }
+}
+
+challenge "relay.37" version=1 {
+    title "A Signal Deep in Storage"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.36"
+        teaches "relay.step.37"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "find"
+        }
+    }
+    objective {
+        text "Find pulse.txt under storage and read the live pulse message."
+    }
+    setup {
+        mkdir "~/storage"
+        mkdir "~/storage/old"
+        mkdir "~/storage/ridge"
+        mkdir "~/storage/old/2019"
+        mkdir "~/storage/ridge/2026"
+        write "~/storage/old/2019/pulse.txt" {
+            text "obsolete\n"
+        }
+        write "~/storage/ridge/2026/pulse.txt" {
+            text "pulse stable at ridge\n"
+        }
+    }
+    verify {
+        all {
+            file-read "~/storage/ridge/2026/pulse.txt" "pulse stable at ridge"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Search the ridge branch, not the old archive."
+        }
+        hint level=2 {
+            text "Once find returns a path, pass that path to cat. Run man find or find --help for syntax."
+        }
+    }
+    solution {
+        concept "Narrowing a search tree avoids irrelevant matches."
+        command "find ~/storage/ridge -name pulse.txt"
+        command "cat ~/storage/ridge/2026/pulse.txt"
+    }
+}
+
+challenge "relay.38" version=1 {
+    title "Read Only the Warning"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.37"
+        teaches "relay.step.38"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "find"
+            allow "grep"
+        }
+    }
+    objective {
+        text "Find current.log under relay, then save its WARNING line in warning.txt."
+    }
+    setup {
+        mkdir "~/relay"
+        mkdir "~/relay/live"
+        mkdir "~/relay/old"
+        write "~/relay/old/current.log" {
+            text "OK old\n"
+        }
+        write "~/relay/live/current.log" {
+            text "OK linked\nWARNING drift\nOK retry\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/warning.txt" "WARNING drift\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Search in live rather than old so you inspect the right log."
+        }
+        hint level=2 {
+            text "Use grep on the path you found, then redirect its output. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "A file search and a text search answer different questions."
+        command "find ~/relay/live -name current.log"
+        command "grep WARNING ~/relay/live/current.log > ~/warning.txt"
+    }
+}
+
+challenge "relay.39" version=1 {
+    title "Order the Errors"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.38"
+        teaches "relay.step.39"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+            allow "sort"
+        }
+    }
+    objective {
+        text "Keep ERROR lines from events.log and save them alphabetically in errors.txt."
+    }
+    setup {
+        write "~/events.log" {
+            text "INFO up\nERROR zebra\nERROR alpha\nINFO retry\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/errors.txt" "ERROR alpha\nERROR zebra\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "First filter the events, then order what remains."
+        }
+        hint level=2 {
+            text "A pipe can connect grep to sort before saving. Run man sort or sort --help for syntax."
+        }
+    }
+    solution {
+        concept "Filtering before sorting reduces the amount of data to inspect."
+        command "grep ERROR ~/events.log | sort > ~/errors.txt"
+    }
+}
+
+challenge "relay.40" version=1 {
+    title "One Alert per Cause"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.39"
+        teaches "relay.step.40"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+            allow "sort"
+            allow "uniq"
+        }
+    }
+    objective {
+        text "Make a sorted list of distinct ALERT lines from alerts.log."
+    }
+    setup {
+        write "~/alerts.log" {
+            text "ALERT heat\nOK fan\nALERT voltage\nALERT heat\nALERT voltage\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/causes.txt" "ALERT heat\nALERT voltage\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The same cause appears more than once and not next to itself."
+        }
+        hint level=2 {
+            text "Filter, sort, then remove adjacent duplicates. Run man uniq or uniq --help for syntax."
+        }
+    }
+    solution {
+        concept "A three-stage pipeline can turn noisy logs into a useful summary."
+        command "grep ALERT ~/alerts.log | sort | uniq > ~/causes.txt"
+    }
+}
+
+challenge "relay.41" version=1 {
+    title "Secure the Copied Logs"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.40"
+        teaches "relay.step.41"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Copy both .log files into review, lock private.log to mode 600, and delete the copied noisy.log."
+    }
+    setup {
+        mkdir "~/reports"
+        mkdir "~/review"
+        write "~/reports/private.log" {
+            text "crew\n"
+        }
+        write "~/reports/noisy.log" {
+            text "static\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/review/private.log" "crew\n"
+            file-mode "~/review/private.log" "600"
+            file-missing "~/review/noisy.log"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Copy the matching files first; then keep only the useful copy."
+        }
+        hint level=2 {
+            text "The wildcard handles both logs; chmod and rm finish the cleanup. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "A broad copy can be followed by precise protection and cleanup."
+        command "cp ~/reports/*.log ~/review/"
+        command "chmod 600 ~/review/private.log"
+        command "rm ~/review/noisy.log"
+    }
+}
+
+challenge "relay.42" version=1 {
+    title "Recover the Misfiled Part"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.41"
+        teaches "relay.step.42"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "find"
+            allow "mv"
+        }
+    }
+    objective {
+        text "Find fuse.txt in crates, move it into repaired, and remove its old path."
+    }
+    setup {
+        mkdir "~/crates"
+        mkdir "~/repaired"
+        mkdir "~/crates/box1"
+        mkdir "~/crates/box3"
+        write "~/crates/box3/fuse.txt" {
+            text "fresh fuse\n"
+        }
+        write "~/crates/box1/label.txt" {
+            text "old\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/repaired/fuse.txt" "fresh fuse\n"
+            file-missing "~/crates/box3/fuse.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The part is inside a nested crate."
+        }
+        hint level=2 {
+            text "Use the path returned by find as mv's source. Run man find or find --help for syntax."
+        }
+    }
+    solution {
+        concept "Search first, then act on the exact file found."
+        command "find ~/crates -name fuse.txt"
+        command "mv ~/crates/box3/fuse.txt ~/repaired/"
+    }
+}
+
+challenge "relay.43" version=1 {
+    title "The Latest Alarms"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.42"
+        teaches "relay.step.43"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+            allow "tail"
+        }
+    }
+    objective {
+        text "Save the last ten ALERT entries from the twelve-line alarm stream."
+    }
+    setup {
+        write "~/alarms.log" {
+            text "ALERT 01\nALERT 02\nALERT 03\nALERT 04\nALERT 05\nALERT 06\nALERT 07\nALERT 08\nALERT 09\nALERT 10\nALERT 11\nALERT 12\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/latest.txt" "ALERT 03\nALERT 04\nALERT 05\nALERT 06\nALERT 07\nALERT 08\nALERT 09\nALERT 10\nALERT 11\nALERT 12\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "All twelve lines are alarms; you need the newest ten."
+        }
+        hint level=2 {
+            text "Place tail after grep in the pipeline. Run man tail or tail --help for syntax."
+        }
+    }
+    solution {
+        concept "tail can act on another command's output."
+        command "grep ALERT ~/alarms.log | tail > ~/latest.txt"
+    }
+}
+
+challenge "relay.44" version=1 {
+    title "Measure the Distinct Calls"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.43"
+        teaches "relay.step.44"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "sort"
+            allow "uniq"
+            allow "wc"
+        }
+    }
+    objective {
+        text "Count the bytes in the sorted, deduplicated call-sign list and save the count."
+    }
+    setup {
+        write "~/calls.txt" {
+            text "red\nblue\nred\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/bytes.txt" "9\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The repeated red call sign should count only once."
+        }
+        hint level=2 {
+            text "Sort, deduplicate, then count the resulting bytes. Run man wc or wc --help for syntax."
+        }
+    }
+    solution {
+        concept "The output of one filter becomes the input to the next."
+        command "sort ~/calls.txt | uniq | wc > ~/bytes.txt"
+    }
+}
+
+challenge "relay.45" version=1 {
+    title "Release a Crew Copy"
+    summary "Deep Recovery — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 7
+    skills {
+        requires "relay.step.44"
+        teaches "relay.step.45"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Copy orders.txt to dispatch, set the copy to mode 640, and remove the stale draft."
+    }
+    setup {
+        mkdir "~/dispatch"
+        write "~/orders.txt" {
+            text "leave at dawn\n"
+        }
+        write "~/draft.txt" {
+            text "old route\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/dispatch/orders.txt" "leave at dawn\n"
+            file-mode "~/dispatch/orders.txt" "640"
+            file-missing "~/draft.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Three outcomes need three actions: copy, protect, discard."
+        }
+        hint level=2 {
+            text "Mode 640 lets the crew read without letting everyone read. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Multi-step repairs are verified by their final state, not by a command string."
+        command "cp ~/orders.txt ~/dispatch/"
+        command "chmod 640 ~/dispatch/orders.txt"
+        command "rm ~/draft.txt"
+    }
+}
+
+challenge "relay.46" version=1 {
+    title "Rebuild the Board"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.45"
+        teaches "relay.step.46"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+            allow "mkdir"
+        }
+    }
+    objective {
+        text "Create board/live, copy status.txt into it, and make the copy owner-only."
+    }
+    setup {
+        write "~/status.txt" {
+            text "amber\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/board/live/status.txt" "amber\n"
+            file-mode "~/board/live/status.txt" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The destination path is missing, so make it first."
+        }
+        hint level=2 {
+            text "The copy is private; change its permissions after copying. Run man mkdir or mkdir --help for syntax."
+        }
+    }
+    solution {
+        concept "The order of operations matters when a destination does not exist."
+        command "mkdir -p ~/board/live"
+        command "cp ~/status.txt ~/board/live/"
+        command "chmod 600 ~/board/live/status.txt"
+    }
+}
+
+challenge "relay.47" version=1 {
+    title "Triage the Night Log"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.46"
+        teaches "relay.step.47"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "grep"
+            allow "sort"
+            allow "uniq"
+        }
+    }
+    objective {
+        text "Create a sorted list of distinct ALERT lines and lock it to mode 600."
+    }
+    setup {
+        write "~/night.log" {
+            text "ALERT heat\nOK fan\nALERT cold\nALERT heat\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/triage.txt" "ALERT cold\nALERT heat\n"
+            file-mode "~/triage.txt" "600"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Build the summary from the noisy log before protecting it."
+        }
+        hint level=2 {
+            text "Filter, order, deduplicate, then set the file mode. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "Pipelines make a report; chmod controls who can read it."
+        command "grep ALERT ~/night.log | sort | uniq > ~/triage.txt"
+        command "chmod 600 ~/triage.txt"
+    }
+}
+
+challenge "relay.48" version=1 {
+    title "Unlock the Backup Phrase"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.47"
+        teaches "relay.step.48"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "chmod"
+            allow "find"
+        }
+    }
+    objective {
+        text "Find phrase.txt inside vault, restore owner read access, and read it."
+    }
+    setup {
+        mkdir "~/vault"
+        mkdir "~/vault/2026"
+        mkdir "~/vault/old"
+        write "~/vault/old/note.txt" {
+            text "empty\n"
+        }
+        write "~/vault/2026/phrase.txt" {
+            text "Use channel 73.\n"
+        }
+        mode "~/vault/2026/phrase.txt" 0
+    }
+    verify {
+        all {
+            file-mode "~/vault/2026/phrase.txt" "400"
+            file-read "~/vault/2026/phrase.txt" "Use channel 73."
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The found file exists but cannot be read yet."
+        }
+        hint level=2 {
+            text "Give the owner read permission before opening it. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "Finding a path does not bypass its permissions."
+        command "find ~/vault -name phrase.txt"
+        command "chmod u+r ~/vault/2026/phrase.txt"
+        command "cat ~/vault/2026/phrase.txt"
+    }
+}
+
+challenge "relay.49" version=1 {
+    title "Replace the Broken Config"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.48"
+        teaches "relay.step.49"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Remove broken config.txt, restore it from backup, and make the restored copy mode 640."
+    }
+    setup {
+        mkdir "~/backup"
+        mkdir "~/live"
+        write "~/live/config.txt" {
+            text "broken\n"
+        }
+        write "~/backup/config.txt" {
+            text "channel=73\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/live/config.txt" "channel=73\n"
+            file-mode "~/live/config.txt" "640"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The good copy is already in backup."
+        }
+        hint level=2 {
+            text "Replace the broken file before setting its final mode. Run man cp or cp --help for syntax."
+        }
+    }
+    solution {
+        concept "A safe recovery keeps the known-good source and repairs the active copy."
+        command "rm ~/live/config.txt"
+        command "cp ~/backup/config.txt ~/live/config.txt"
+        command "chmod 640 ~/live/config.txt"
+    }
+}
+
+challenge "relay.50" version=1 {
+    title "Publish a Clean Bulletin"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.49"
+        teaches "relay.step.50"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "grep"
+            allow "mkdir"
+        }
+    }
+    objective {
+        text "Create dispatch, save only READY lines from feed.txt there, and keep the source unchanged."
+    }
+    setup {
+        write "~/feed.txt" {
+            text "NOISE\nREADY east\nNOISE\nREADY west\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/dispatch/ready.txt" "READY east\nREADY west\n"
+            file-equals "~/feed.txt" "NOISE\nREADY east\nNOISE\nREADY west\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The destination folder does not exist."
+        }
+        hint level=2 {
+            text "Create dispatch, then redirect the matching lines into it. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "Derived reports should not damage their source logs."
+        command "mkdir ~/dispatch"
+        command "grep READY ~/feed.txt > ~/dispatch/ready.txt"
+    }
+}
+
+challenge "relay.51" version=1 {
+    title "Archive the Shift"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.50"
+        teaches "relay.step.51"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cp"
+            allow "mkdir"
+            allow "mv"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Move finished.log into archive/2026, save a copy of its message as receipt.txt, and remove scratch.txt."
+    }
+    setup {
+        write "~/finished.log" {
+            text "shift complete\n"
+        }
+        write "~/scratch.txt" {
+            text "temporary\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/archive/2026/finished.log" "shift complete\n"
+            file-equals "~/receipt.txt" "shift complete\n"
+            file-missing "~/scratch.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The archive path must be created before moving the log."
+        }
+        hint level=2 {
+            text "Make the receipt while the source is still easy to reach. Run man mv or mv --help for syntax."
+        }
+    }
+    solution {
+        concept "An archive operation can preserve a receipt while clearing temporary work."
+        command "mkdir -p ~/archive/2026"
+        command "cp ~/finished.log ~/receipt.txt"
+        command "mv ~/finished.log ~/archive/2026/"
+        command "rm ~/scratch.txt"
+    }
+}
+
+challenge "relay.52" version=1 {
+    title "Secure the Handoff"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.51"
+        teaches "relay.step.52"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "chmod"
+            allow "cp"
+            allow "echo"
+        }
+    }
+    objective {
+        text "Append channel 73 to handoff.txt, copy it to crew, then set the crew copy to mode 640."
+    }
+    setup {
+        mkdir "~/crew"
+        write "~/handoff.txt" {
+            text "northstar ready\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/handoff.txt" "northstar ready\nchannel 73\n"
+            file-equals "~/crew/handoff.txt" "northstar ready\nchannel 73\n"
+            file-mode "~/crew/handoff.txt" "640"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Update the handoff before making the crew copy."
+        }
+        hint level=2 {
+            text "Use >> to preserve the existing first line. Run man echo or echo --help for syntax."
+        }
+    }
+    solution {
+        concept "Append, copy, and protect form a useful handoff sequence."
+        command "echo 'channel 73' >> ~/handoff.txt"
+        command "cp ~/handoff.txt ~/crew/"
+        command "chmod 640 ~/crew/handoff.txt"
+    }
+}
+
+challenge "relay.53" version=1 {
+    title "Clear the False Alarm"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.52"
+        teaches "relay.step.53"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cp"
+            allow "grep"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Remove stale.log, copy stable.log into live, and save its OK line in confirmation.txt."
+    }
+    setup {
+        mkdir "~/live"
+        write "~/stale.log" {
+            text "ALERT false\n"
+        }
+        write "~/stable.log" {
+            text "OK link restored\nNOISE\n"
+        }
+    }
+    verify {
+        all {
+            file-missing "~/stale.log"
+            file-equals "~/live/stable.log" "OK link restored\nNOISE\n"
+            file-equals "~/confirmation.txt" "OK link restored\n"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "The two logs have different jobs: discard one and publish the other."
+        }
+        hint level=2 {
+            text "Confirm the restored copy, not the source. Run man grep or grep --help for syntax."
+        }
+    }
+    solution {
+        concept "A repair can include removal, deployment, and a verified report."
+        command "rm ~/stale.log"
+        command "cp ~/stable.log ~/live/"
+        command "grep OK ~/live/stable.log > ~/confirmation.txt"
+    }
+}
+
+challenge "relay.54" version=1 {
+    title "Light the Northstar"
+    summary "Restore Northstar — repair the Northstar relay."
+    difficulty "advanced"
+    estimated-minutes 8
+    skills {
+        requires "relay.step.53"
+        teaches "relay.step.54"
+    }
+    state "ephemeral"
+    shell "bash"
+    capabilities {
+        network "none"
+        tools {
+            allow "cat"
+            allow "chmod"
+            allow "mkdir"
+            allow "mv"
+            allow "rm"
+        }
+    }
+    objective {
+        text "Create relay/live, put the recovery phrase in notice.txt, make it owner-only, archive old.log, and remove temp.txt."
+    }
+    setup {
+        mkdir "~/archive"
+        mkdir "~/vault"
+        mkdir "~/vault/2026"
+        write "~/vault/2026/phrase.txt" {
+            text "northstar online\n"
+        }
+        write "~/old.log" {
+            text "last outage\n"
+        }
+        write "~/temp.txt" {
+            text "scratch\n"
+        }
+    }
+    verify {
+        all {
+            file-equals "~/relay/live/notice.txt" "northstar online\n"
+            file-mode "~/relay/live/notice.txt" "600"
+            file-equals "~/archive/old.log" "last outage\n"
+            file-missing "~/old.log"
+            file-missing "~/temp.txt"
+        }
+    }
+    hints {
+        hint level=1 {
+            text "Plan the final state: new notice, protected mode, archived log, no scratch."
+        }
+        hint level=2 {
+            text "Create the path before redirecting the phrase into it. Run man chmod or chmod --help for syntax."
+        }
+    }
+    solution {
+        concept "The final repair combines navigation, reading, redirection, permissions, archiving, and cleanup."
+        command "mkdir -p ~/relay/live"
+        command "cat ~/vault/2026/phrase.txt > ~/relay/live/notice.txt"
+        command "chmod 600 ~/relay/live/notice.txt"
+        command "mv ~/old.log ~/archive/"
+        command "rm ~/temp.txt"
+    }
+}

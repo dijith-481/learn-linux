@@ -245,6 +245,13 @@ pub enum SetupAction {
 /// A verifier predicate based on resulting sandbox state.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum VerifierPredicate {
+    /// A regular file has the expected Unix permission bits.
+    FileMode {
+        /// File path.
+        path: SandboxPath,
+        /// Permission bits, without file type bits.
+        mode: u32,
+    },
     /// A path exists.
     PathExists(SandboxPath),
     /// A path does not exist.
@@ -294,6 +301,8 @@ pub struct ObservedState {
     pub existing_paths: BTreeSet<SandboxPath>,
     /// File contents keyed by sandbox path.
     pub files: BTreeMap<SandboxPath, Vec<u8>>,
+    /// Permission bits keyed by file path.
+    pub file_modes: BTreeMap<SandboxPath, u32>,
     /// Files observed being read by the learner's shell session.
     pub read_paths: BTreeSet<SandboxPath>,
     /// Last reported working directory.
@@ -308,6 +317,10 @@ impl VerifierExpr {
             Self::Any(children) => children.iter().any(|child| child.evaluate(state)),
             Self::Not(child) => !child.evaluate(state),
             Self::Predicate(predicate) => match predicate {
+                VerifierPredicate::FileMode { path, mode } => state
+                    .file_modes
+                    .get(path)
+                    .is_some_and(|actual| actual == mode),
                 VerifierPredicate::PathExists(path) => state.existing_paths.contains(path),
                 VerifierPredicate::PathMissing(path) => !state.existing_paths.contains(path),
                 VerifierPredicate::FileContains { path, needle } => state
@@ -536,6 +549,7 @@ mod tests {
         let state = ObservedState {
             existing_paths: [path.clone()].into_iter().collect(),
             files: [(path, b"done!".to_vec())].into_iter().collect(),
+            file_modes: BTreeMap::new(),
             read_paths: BTreeSet::new(),
             working_directory: None,
         };

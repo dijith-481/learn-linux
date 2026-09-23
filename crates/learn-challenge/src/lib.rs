@@ -175,6 +175,18 @@ pub fn compile_source(
         .collect()
 }
 
+/// Compile the lessons bundled into the executable.
+pub fn compile_builtin() -> Result<ContentPack, CompileError> {
+    let mut challenges = compile_source(
+        include_str!("../../../content/challenges/northstar.kdl"),
+        "builtin/northstar.kdl",
+    )?;
+    challenges.sort_by(|left, right| left.spec.id.cmp(&right.spec.id));
+    let pack = ContentPack { challenges };
+    pack.validate()?;
+    Ok(pack)
+}
+
 /// Compile every KDL file in a directory.
 pub fn compile_directory(directory: impl AsRef<Path>) -> Result<ContentPack, CompileError> {
     let directory = directory.as_ref();
@@ -408,6 +420,21 @@ fn parse_verifier_node(node: &KdlNode) -> Result<VerifierExpr, CompileError> {
                 .copied()
                 .ok_or(CompileError::MissingNode("not predicate"))?,
         )?))),
+        "file-mode" => {
+            let path = SandboxPath::parse(string_argument(node, 0, "path")?)?;
+            let octal = string_argument(node, 1, "octal mode")?;
+            let mode = u32::from_str_radix(&octal, 8)
+                .map_err(|_| CompileError::InvalidValue(format!("invalid file mode {octal}")))?;
+            if mode > 0o777 {
+                return Err(CompileError::InvalidValue(format!(
+                    "invalid file mode {octal}"
+                )));
+            }
+            Ok(VerifierExpr::Predicate(VerifierPredicate::FileMode {
+                path,
+                mode,
+            }))
+        }
         "file-exists" => Ok(VerifierExpr::Predicate(VerifierPredicate::PathExists(
             SandboxPath::parse(string_argument(node, 0, "path")?)?,
         ))),
@@ -715,6 +742,36 @@ pub enum CompileError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bundled_lessons_match_repository_content() {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../content/challenges");
+        let disk = compile_directory(directory).expect("repository content");
+        let bundled = compile_builtin().expect("bundled content");
+        let bundled_specs = bundled
+            .challenges
+            .iter()
+            .map(|item| &item.spec)
+            .collect::<Vec<_>>();
+        let disk_specs = disk
+            .challenges
+            .iter()
+            .map(|item| &item.spec)
+            .collect::<Vec<_>>();
+        assert_eq!(bundled_specs, disk_specs);
+        assert_eq!(bundled.challenges.len(), 54);
+        for (chapter, difficulty) in bundled.challenges.chunks_exact(18).zip([
+            Difficulty::Beginner,
+            Difficulty::Intermediate,
+            Difficulty::Advanced,
+        ]) {
+            assert!(
+                chapter
+                    .iter()
+                    .all(|challenge| challenge.spec.meta.difficulty == difficulty)
+            );
+        }
+    }
 
     const SOURCE: &str = r#"
 challenge "fs.find.lost-note" version=1 {

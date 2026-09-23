@@ -25,6 +25,20 @@ content simulate --all executes every canonical solution through the embedded
 runtime and verifies the resulting virtual filesystem. cargo run opens the
 full-screen Ratatui client immediately; no runtime installation is needed.
 
+On Windows, use Rust 1.86+ in PowerShell or Windows Terminal:
+
+```powershell
+cargo test --workspace --locked
+cargo build --release --locked
+.\target\release\learn.exe
+```
+
+The Windows executable includes the lessons and local docs, so it can be moved
+out of the source checkout. The lesson shell is simulated inside the app; it
+does not require WSL, Bash, Bubblewrap, or a Linux rootfs. The standalone
+daemon uses a local Windows named pipe; Unix builds use a local Unix socket.
+There is no web frontend or browser listener.
+
 learn doctor reports the embedded WASM lesson runtime as the required
 capability. Bubblewrap, namespaces, PTY support, and a rootfs are shown only
 as optional native-backend information. The simulator is intentionally not
@@ -36,7 +50,11 @@ portable terminal stream. A small, state-driven success reveal uses the
 community `tachyonfx` animation library; calm motion can be toggled from the
 command palette. Press `Ctrl-Space` for the centered searchable command
 palette, which can open docs, challenges, progress, Vim dojo, reset the
-current challenge, toggle the pet/rain/motion, change themes, or quit. `Ctrl-H`
+current challenge, toggle the pet/rain/motion, change themes, or quit. Press
+`Ctrl-T` at any time to cycle instantly through the 21 built-in themes
+(Default, Catppuccin/Latte, Nord/Light, Tokyo Night/Light, Everforest/Light,
+Gruvbox/Light, Dracula, Rosé Pine, Solarized Dark/Light, One Dark, Monokai,
+Kanagawa, Ayu, Palenight, Night Owl). `Ctrl-H`
 focuses the terminal and `Ctrl-L` focuses the always-visible local docs pane.
 The active shell has a visible block cursor, arrow/Home/End editing, and Tab
 completion for commands and lesson files. There are no function-key controls;

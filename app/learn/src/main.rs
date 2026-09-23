@@ -11,7 +11,7 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use learn_challenge::compile_directory;
+use learn_challenge::compile_builtin;
 use learn_daemon::Daemon;
 use learn_runtime::{
     WasmSession, default_rootfs_path, doctor, install_rootfs, start_wasm_session, verify_rootfs,
@@ -32,7 +32,7 @@ struct Cli {
 enum Command {
     /// Launch the full-screen client.
     Tui,
-    /// Run the daemon on the local Unix socket.
+    /// Run the daemon over local IPC (Unix socket or Windows named pipe).
     Daemon,
     /// Attach a plain terminal to one real sandboxed challenge.
     Shell { challenge_id: String },
@@ -99,22 +99,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .try_init()
         .ok();
     let cli = Cli::parse();
-    let root = repository_root();
     match cli.command.unwrap_or(Command::Tui) {
         Command::Tui => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             learn_tui::run(&daemon, None).await?;
         }
         Command::Daemon => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             let socket = learn_daemon::socket_path();
-            let web_address = learn_daemon::websocket_address();
             println!("learn daemon listening on {}", socket.display());
-            println!("learn web bridge listening on ws://{web_address}/ws");
-            tokio::try_join!(daemon.serve(socket), daemon.serve_websocket(web_address))?;
+            daemon.serve(socket).await?;
         }
         Command::Shell { challenge_id } => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             run_shell(&daemon, &challenge_id)?;
         }
         Command::Doctor { json } => {
@@ -139,7 +136,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
         Command::Content { command } => match command {
             ContentCommand::Check => {
-                let pack = compile_directory(root.join("content/challenges"))?;
+                let pack = compile_builtin()?;
                 println!(
                     "content: {} challenges compiled; 0 errors",
                     pack.challenges.len()
@@ -149,7 +146,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             ContentCommand::Simulate { all } => {
-                let pack = compile_directory(root.join("content/challenges"))?;
+                let pack = compile_builtin()?;
                 if !all && pack.challenges.len() != 1 {
                     return Err("pass --all when simulating a content pack".into());
                 }
@@ -161,13 +158,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         100,
                         30,
                     )?;
-                    let mut solved = false;
                     println!("{}: simulating canonical solution", challenge.spec.id);
                     for command in challenge.spec.solution.commands {
                         println!("  $ {command}");
                         session.write(format!("{command}\r").as_bytes())?;
-                        solved = session.verify(&challenge.spec.verifier)?;
                     }
+                    let solved = session.verify(&challenge.spec.verifier)?;
                     if !solved {
                         return Err(format!(
                             "canonical solution did not verify for {}",
@@ -180,7 +176,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
         Command::Graph => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             println!("Challenges:");
             for challenge in &daemon.content.challenges {
                 println!("  {} — {}", challenge.spec.id, challenge.spec.meta.title);
@@ -191,14 +187,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Docs { query, limit } => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             for result in daemon.search_docs(&query, limit) {
                 println!("{} — {}", result.document.id, result.document.title);
                 println!("  {}", result.snippet);
             }
         }
         Command::Status => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             let progress = daemon.progress()?;
             println!(
                 "completed: {}",
@@ -215,7 +211,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Command::Reset { challenge_id } => {
-            let daemon = Daemon::load(root.join("content/challenges"))?;
+            let daemon = Daemon::load_builtin()?;
             let id = learn_core::ChallengeId::new(challenge_id)?;
             daemon.reset_challenge(&id)?;
             println!("reset progress for {id}");
@@ -324,11 +320,4 @@ fn key_bytes(code: KeyCode, modifiers: KeyModifiers) -> Option<Vec<u8>> {
         KeyCode::Left => b"\x1b[D".to_vec(),
         _ => return None,
     })
-}
-
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(std::path::Path::parent)
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
 }

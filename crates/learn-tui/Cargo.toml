@@ -8,13 +8,11 @@ rust-version.workspace = true
 [dependencies]
 crossterm.workspace = true
 frizbee.workspace = true
-image.workspace = true
 learn-challenge = { path = "../learn-challenge" }
 learn-daemon = { path = "../learn-daemon" }
 learn-protocol = { path = "../learn-protocol" }
 learn-runtime = { path = "../learn-runtime" }
 ratatui.workspace = true
-ratatui-image.workspace = true
 tachyonfx.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -7,6 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 learn-core = { path = "../learn-core" }
+learn-docs = { path = "../learn-docs" }
 portable-pty.workspace = true
 serde.workspace = true
 thiserror.workspace = true

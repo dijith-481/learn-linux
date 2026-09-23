@@ -327,7 +327,7 @@ fn snippet(body: &str) -> String {
 /// The built-in starter documentation index.
 #[allow(clippy::too_many_lines)]
 pub fn starter_index() -> DocsIndex {
-    DocsIndex::new(vec![
+    let mut documents = vec![
         Document {
             id: "command.pwd".to_owned(),
             title: "pwd — print the working directory".to_owned(),
@@ -563,7 +563,93 @@ pub fn starter_index() -> DocsIndex {
             body: "Use true when a command that succeeds without producing output is needed. It is mostly useful in shell experiments.".to_owned(),
             aliases: vec!["do nothing".to_owned(), "successful no-op".to_owned()],
         },
-    ])
+    ];
+    documents.extend([
+        manual_document(
+            "man",
+            "read a local command manual",
+            "manual reference instructions",
+        ),
+        manual_document(
+            "chmod",
+            "change file permissions",
+            "permissions octal owner group world",
+        ),
+        manual_document("stat", "show file mode", "inspect permissions mode"),
+        manual_document("tail", "show the last lines", "end of file final lines"),
+        manual_document("sort", "sort lines", "alphabetical order"),
+        manual_document(
+            "uniq",
+            "remove adjacent duplicate lines",
+            "deduplicate repeated lines",
+        ),
+    ]);
+    for document in &mut documents {
+        if let Some(command) = document.id.strip_prefix("command.")
+            && let Some(details) = manual_details(command)
+        {
+            document.body.push_str("\n\n");
+            document.body.push_str(details);
+        }
+    }
+    DocsIndex::new(documents)
+}
+
+/// Return a command's offline manual from the same content as the docs pane.
+pub fn command_manual(command: &str) -> Option<String> {
+    let id = format!("command.{command}");
+    starter_index()
+        .documents
+        .into_iter()
+        .find(|document| document.id == id)
+        .map(|document| format!("{}\n\n{}\n", document.title, document.body))
+}
+
+fn manual_document(command: &str, summary: &str, aliases: &str) -> Document {
+    Document {
+        id: format!("command.{command}"),
+        title: format!("{command} — {summary}"),
+        body: format!(
+            "Use {command} in the lesson shell. Run man {command} or {command} --help for supported syntax."
+        ),
+        aliases: aliases.split_whitespace().map(str::to_owned).collect(),
+    }
+}
+
+fn manual_details(command: &str) -> Option<&'static str> {
+    Some(match command {
+        "pwd" => "USAGE: pwd\nPrint the current directory.",
+        "cd" => "USAGE: cd [DIR]\nChange directory. ~ means your home.",
+        "ls" => "USAGE: ls [DIR]\nList immediate children.",
+        "mkdir" => "USAGE: mkdir [-p] DIR...\nCreate folders; -p also creates missing parents.",
+        "touch" => "USAGE: touch FILE...\nCreate empty files without replacing existing contents.",
+        "cat" => "USAGE: cat [FILE...]\nPrint files or piped input.",
+        "less" => "USAGE: less FILE\nDisplay a file in this lesson shell.",
+        "cp" => "USAGE: cp SOURCE... DEST\nCopy files; use * to select several names.",
+        "mv" => "USAGE: mv SOURCE DEST\nMove or rename one file.",
+        "rm" => "USAGE: rm FILE...\nRemove files in the virtual home; folders are not removed.",
+        "find" => "USAGE: find DIR [-name NAME]\nSearch a directory tree for a filename.",
+        "grep" => "USAGE: grep PATTERN [FILE]\nPrint matching lines from a file or pipe.",
+        "head" => "USAGE: head [FILE]\nPrint the first ten lines.",
+        "tail" => "USAGE: tail [FILE]\nPrint the last ten lines.",
+        "sort" => "USAGE: sort [FILE]\nSort lines alphabetically; also accepts piped input.",
+        "uniq" => {
+            "USAGE: uniq [FILE]\nRemove adjacent duplicate lines; sort first for global deduplication."
+        }
+        "wc" => "USAGE: wc\nCount input bytes from a pipe in this lesson shell.",
+        "echo" => "USAGE: echo WORD...\nPrint words followed by a newline.",
+        "printf" => "USAGE: printf TEXT\nPrint text without adding a newline.",
+        "chmod" => {
+            "USAGE: chmod MODE FILE...\nSet file permissions. MODE can be octal (600, 644, 755) or symbolic (u+x, go-r, u=rw,go=). r=read, w=write, x=execute."
+        }
+        "stat" => "USAGE: stat FILE\nShow the file's octal permission mode.",
+        "man" => "USAGE: man COMMAND\nRead the local manual for a supported command.",
+        "help" => "USAGE: help [COMMAND]\nList commands or read one command's help.",
+        "clear" => "USAGE: clear\nClear the terminal display.",
+        "exit" => "USAGE: exit\nClose the current lesson shell.",
+        "true" => "USAGE: true\nSucceed without output.",
+        _ => return None,
+    })
 }
 
 #[cfg(test)]

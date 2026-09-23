@@ -16,6 +16,7 @@ use learn_core::{
     EnvironmentSpec, NetworkPolicy, SandboxPath, SetupAction, StateMode, ToolId,
     ToolRestrictionStrength, VerifierExpr, VerifierPredicate,
 };
+use learn_docs::command_manual;
 
 /// The embedded guest module's stable ABI version.
 pub const WASM_GUEST_ABI_VERSION: i32 = 1;
@@ -649,6 +650,11 @@ impl VirtualShell {
         if !is_known_command(command) {
             return CommandResult::failure(format!("learn: command '{command}' not found"));
         }
+        if argv.get(1).is_some_and(|arg| arg == "--help") {
+            return CommandResult::success(
+                command_manual(command).unwrap_or_default().into_bytes(),
+            );
+        }
         if !self.command_allowed(command) {
             return CommandResult::failure(format!(
                 "learn: command '{command}' is disabled for this challenge"
@@ -661,9 +667,26 @@ impl VirtualShell {
             "echo" => CommandResult::success(format!("{}\n", argv[1..].join(" ")).into_bytes()),
             "true" | "exit" => CommandResult::success(Vec::new()),
             "clear" => CommandResult::success(b"\x1b[2J\x1b[H".to_vec()),
-            "help" => CommandResult::success(
-                b"Try: ls  cat FILE  cd DIR  mkdir DIR  touch FILE  find  grep  pwd  exit\n"
-                    .to_vec(),
+            "help" => {
+                if let Some(name) = argv.get(1) {
+                    command_manual(name).map_or_else(
+                        || CommandResult::failure(format!("help: no entry for {name}")),
+                        |manual| CommandResult::success(manual.into_bytes()),
+                    )
+                } else {
+                    CommandResult::success(
+                        b"Try: man COMMAND  help COMMAND  COMMAND --help\n".to_vec(),
+                    )
+                }
+            }
+            "man" => argv.get(1).map_or_else(
+                || CommandResult::failure("man: expected a command name"),
+                |name| {
+                    command_manual(name).map_or_else(
+                        || CommandResult::failure(format!("man: no entry for {name}")),
+                        |manual| CommandResult::success(manual.into_bytes()),
+                    )
+                },
             ),
             "mkdir" => self.command_mkdir(&argv[1..]),
             "touch" => self.command_touch(&argv[1..]),
@@ -675,6 +698,11 @@ impl VirtualShell {
             "find" => self.command_find(&argv[1..]),
             "ls" => self.command_ls(&argv[1..], piped_output),
             "head" => self.command_head(&argv[1..], input),
+            "tail" => self.command_tail(&argv[1..], input),
+            "sort" => self.command_sort(&argv[1..], input),
+            "uniq" => self.command_uniq(&argv[1..], input),
+            "chmod" => self.command_chmod(&argv[1..]),
+            "stat" => self.command_stat(&argv[1..]),
             "wc" => CommandResult::success(format!("{}\n", input.len()).into_bytes()),
             _ => CommandResult::failure(format!("learn: command '{command}' not found")),
         }
@@ -696,8 +724,9 @@ impl VirtualShell {
     fn completion_candidates(&self, token: &str, command_position: bool) -> Vec<(String, bool)> {
         if command_position {
             return [
-                "cat", "cd", "clear", "cp", "echo", "exit", "find", "grep", "head", "help", "less",
-                "ls", "mkdir", "mv", "printf", "pwd", "rm", "touch", "true", "wc",
+                "cat", "cd", "chmod", "clear", "cp", "echo", "exit", "find", "grep", "head",
+                "help", "less", "ls", "man", "mkdir", "mv", "printf", "pwd", "rm", "sort", "stat",
+                "tail", "touch", "true", "uniq", "wc",
             ]
             .into_iter()
             .filter(|command| self.command_allowed(command) && command.starts_with(token))
@@ -1036,6 +1065,110 @@ impl VirtualShell {
         CommandResult::success(output)
     }
 
+    fn command_tail(&self, argv: &[String], input: &[u8]) -> CommandResult {
+        let contents = if let Some(path) = argv.first() {
+            match self
+                .resolve(path)
+                .and_then(|path| self.read_file_path(&path))
+            {
+                Ok(contents) => contents,
+                Err(error) => return CommandResult::failure(error),
+            }
+        } else {
+            input.to_vec()
+        };
+        let lines = contents
+            .split_inclusive(|byte| *byte == b'\n')
+            .collect::<Vec<_>>();
+        CommandResult::success(lines[lines.len().saturating_sub(10)..].concat())
+    }
+
+    fn command_sort(&self, argv: &[String], input: &[u8]) -> CommandResult {
+        let contents = if let Some(path) = argv.first() {
+            match self
+                .resolve(path)
+                .and_then(|path| self.read_file_path(&path))
+            {
+                Ok(contents) => contents,
+                Err(error) => return CommandResult::failure(error),
+            }
+        } else {
+            input.to_vec()
+        };
+        let mut lines = String::from_utf8_lossy(&contents)
+            .lines()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        lines.sort();
+        CommandResult::success(if lines.is_empty() {
+            Vec::new()
+        } else {
+            format!("{}\n", lines.join("\n")).into_bytes()
+        })
+    }
+
+    fn command_uniq(&self, argv: &[String], input: &[u8]) -> CommandResult {
+        let contents = if let Some(path) = argv.first() {
+            match self
+                .resolve(path)
+                .and_then(|path| self.read_file_path(&path))
+            {
+                Ok(contents) => contents,
+                Err(error) => return CommandResult::failure(error),
+            }
+        } else {
+            input.to_vec()
+        };
+        let mut unique = Vec::new();
+        let text = String::from_utf8_lossy(&contents);
+        for line in text.lines() {
+            if unique.last().is_none_or(|last| *last != line) {
+                unique.push(line);
+            }
+        }
+        CommandResult::success(if unique.is_empty() {
+            Vec::new()
+        } else {
+            format!("{}\n", unique.join("\n")).into_bytes()
+        })
+    }
+
+    fn command_chmod(&mut self, argv: &[String]) -> CommandResult {
+        if argv.len() < 2 {
+            return CommandResult::failure("chmod: expected MODE FILE...");
+        }
+        for raw in &argv[1..] {
+            let path = match self.resolve(raw) {
+                Ok(path) => path,
+                Err(error) => return CommandResult::failure(error),
+            };
+            let Some(Node::File { mode, .. }) = self.fs.get_mut(&path) else {
+                return CommandResult::failure(format!("chmod: not a file: {raw}"));
+            };
+            match parse_permission_mode(*mode, &argv[0]) {
+                Ok(updated) => *mode = updated,
+                Err(error) => return CommandResult::failure(error),
+            }
+        }
+        CommandResult::success(Vec::new())
+    }
+
+    fn command_stat(&self, argv: &[String]) -> CommandResult {
+        let Some(raw) = argv.first() else {
+            return CommandResult::failure("stat: expected FILE");
+        };
+        let path = match self.resolve(raw) {
+            Ok(path) => path,
+            Err(error) => return CommandResult::failure(error),
+        };
+        match self.fs.get(&path) {
+            Some(Node::File { mode, .. }) => {
+                CommandResult::success(format!("{mode:03o} {path}\n").into_bytes())
+            }
+            _ => CommandResult::failure(format!("stat: not a file: {raw}")),
+        }
+    }
+
     fn mkdir(&mut self, raw: &str, parents: bool) -> Result<(), RuntimeError> {
         let path = self.resolve(raw).map_err(RuntimeError::Shell)?;
         if matches!(self.fs.get(&path), Some(Node::Directory)) {
@@ -1103,7 +1236,8 @@ impl VirtualShell {
 
     fn read_file_path(&self, path: &str) -> Result<Vec<u8>, String> {
         match self.fs.get(path) {
-            Some(Node::File { contents, .. }) => Ok(contents.clone()),
+            Some(Node::File { contents, mode }) if mode & 0o400 != 0 => Ok(contents.clone()),
+            Some(Node::File { .. }) => Err(format!("permission denied: {path}")),
             Some(Node::Directory) => Err(format!("is a directory: {path}")),
             None => Err(format!("no such file: {path}")),
         }
@@ -1114,6 +1248,9 @@ impl VirtualShell {
         self.ensure_parent(&path)?;
         if matches!(self.fs.get(&path), Some(Node::Directory)) {
             return Err(format!("is a directory: {path}"));
+        }
+        if matches!(self.fs.get(&path), Some(Node::File { mode, .. }) if mode & 0o200 == 0) {
+            return Err(format!("permission denied: {path}"));
         }
         let previous = match self.fs.remove(&path) {
             Some(Node::File {
@@ -1158,10 +1295,63 @@ impl CommandResult {
     }
 }
 
+fn parse_permission_mode(current: u32, specification: &str) -> Result<u32, String> {
+    if specification
+        .chars()
+        .all(|character| character.is_ascii_digit())
+    {
+        return u32::from_str_radix(specification, 8)
+            .ok()
+            .filter(|mode| *mode <= 0o777)
+            .ok_or_else(|| format!("chmod: invalid octal mode: {specification}"));
+    }
+    let mut mode = current;
+    for clause in specification.split(',') {
+        let Some(position) = clause.find(['+', '-', '=']) else {
+            return Err(format!("chmod: invalid symbolic mode: {clause}"));
+        };
+        let (who, operation_and_rights) = clause.split_at(position);
+        let operation = operation_and_rights.as_bytes()[0];
+        let rights = &operation_and_rights[1..];
+        if !who
+            .chars()
+            .all(|character| matches!(character, 'u' | 'g' | 'o' | 'a'))
+            || who.is_empty()
+            || !rights
+                .chars()
+                .all(|character| matches!(character, 'r' | 'w' | 'x'))
+        {
+            return Err(format!("chmod: invalid symbolic mode: {clause}"));
+        }
+        let mut target = 0;
+        let mut granted = 0;
+        for (class, shift) in [('u', 6), ('g', 3), ('o', 0)] {
+            if who.contains(class) || who.contains('a') {
+                target |= 0o7 << shift;
+                for right in rights.chars() {
+                    granted |= match right {
+                        'r' => 0o4 << shift,
+                        'w' => 0o2 << shift,
+                        'x' => 0o1 << shift,
+                        _ => 0,
+                    };
+                }
+            }
+        }
+        mode = match operation {
+            b'+' => mode | granted,
+            b'-' => mode & !granted,
+            b'=' => (mode & !target) | granted,
+            _ => return Err(format!("chmod: invalid symbolic mode: {clause}")),
+        };
+    }
+    Ok(mode)
+}
+
 fn is_virtual_builtin(command: &str) -> bool {
     matches!(
         command,
-        "cd" | "pwd" | "printf" | "echo" | "true" | "clear" | "exit"
+        "cd" | "pwd" | "printf" | "echo" | "true" | "clear" | "exit" | "help" | "man"
     )
 }
 
@@ -1170,6 +1360,7 @@ fn is_known_command(command: &str) -> bool {
         command,
         "cat"
             | "cd"
+            | "chmod"
             | "clear"
             | "cp"
             | "echo"
@@ -1180,13 +1371,18 @@ fn is_known_command(command: &str) -> bool {
             | "help"
             | "less"
             | "ls"
+            | "man"
             | "mkdir"
             | "mv"
             | "printf"
             | "pwd"
             | "rm"
+            | "sort"
+            | "stat"
+            | "tail"
             | "touch"
             | "true"
+            | "uniq"
             | "wc"
     )
 }
@@ -1558,6 +1754,10 @@ fn verify_virtual_expression(
             .map(|values| values.into_iter().any(std::convert::identity)),
         VerifierExpr::Not(child) => verify_virtual_expression(shell, child).map(|value| !value),
         VerifierExpr::Predicate(predicate) => match predicate {
+            VerifierPredicate::FileMode { path, mode } => Ok(matches!(
+                shell.fs.get(path.as_str()),
+                Some(Node::File { mode: actual, .. }) if actual == mode
+            )),
             VerifierPredicate::PathExists(path) => Ok(shell.fs.contains_key(path.as_str())),
             VerifierPredicate::PathMissing(path) => Ok(!shell.fs.contains_key(path.as_str())),
             VerifierPredicate::FileContains { path, needle } => {
