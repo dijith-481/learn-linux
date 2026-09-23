@@ -126,8 +126,8 @@ const PALETTE_ENTRIES: [PaletteEntry; 31] = [
     },
     PaletteEntry {
         command: PaletteCommand::SetTheme(ThemeId::Default),
-        label: "Theme: Default",
-        keywords: "theme default classic",
+        label: "Theme: Classic Teal",
+        keywords: "theme classic teal legacy",
     },
     PaletteEntry {
         command: PaletteCommand::SetTheme(ThemeId::Catppuccin),
@@ -772,7 +772,7 @@ async fn app_loop(
     let mut focus = PanelFocus::Left;
     // The pet is an optional atmosphere feature; keep the default lesson
     // focused and let learners enable it from the command palette.
-    let mut theme_id = ThemeId::Default;
+    let mut theme_id = ThemeId::Nord;
     let mut pet_enabled = false;
     let mut pet = PetState::default();
     let mut keyboard = KeyboardState::default();
@@ -2287,44 +2287,51 @@ fn life_next(cells: &[bool], width: usize, height: usize) -> Vec<bool> {
     next
 }
 
+fn life_braille(cells: &[bool], width: usize, x: usize, y: usize) -> char {
+    const DOTS: [[u32; 2]; 4] = [[0x01, 0x08], [0x02, 0x10], [0x04, 0x20], [0x40, 0x80]];
+    let mut mask = 0;
+    for (dy, row) in DOTS.iter().enumerate() {
+        for (dx, dot) in row.iter().enumerate() {
+            if cells[(y * 4 + dy) * width + x * 2 + dx] {
+                mask |= dot;
+            }
+        }
+    }
+    char::from_u32(0x2800 + mask).unwrap_or(' ')
+}
+
 fn render_game_of_life(frame: &mut ratatui::Frame<'_>, area: Rect, time: Duration, theme: Theme) {
-    let width = usize::from(area.width / 2);
-    let height = usize::from(area.height);
-    if width < 5 || height < 5 {
+    let width = usize::from(area.width) * 2;
+    let height = usize::from(area.height) * 4;
+    if width < 10 || height < 10 {
         return;
     }
     let mut cells = vec![false; width * height];
-    for origin_y in (0..height).step_by(13) {
-        for origin_x in (0..width).step_by(19) {
+    for origin_y in (0..height).step_by(31) {
+        for origin_x in (0..width).step_by(41) {
             for (dx, dy) in [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)] {
                 cells[((origin_y + dy) % height) * width + (origin_x + dx) % width] = true;
             }
             for dy in 4..=6 {
                 cells[((origin_y + dy) % height) * width + (origin_x + 10) % width] = true;
             }
-            for (dx, dy) in [(7, 9), (8, 9), (7, 10), (8, 10)] {
-                cells[((origin_y + dy) % height) * width + (origin_x + dx) % width] = true;
-            }
         }
     }
-    let generations = usize::try_from((time.as_millis() / 230) % 60).unwrap_or(0);
+    let generations = usize::try_from((time.as_millis() / 320) % 16).unwrap_or(0);
     for _ in 0..generations {
         cells = life_next(&cells, width, height);
     }
-    for y in 0..height {
-        for x in 0..width {
-            if !cells[y * width + x] {
+    for y in 0..usize::from(area.height) {
+        for x in 0..usize::from(area.width) {
+            let glyph = life_braille(&cells, width, x, y);
+            if glyph == '\u{2800}' {
                 continue;
             }
-            let color = theme.overlay;
-            for half in 0..2 {
-                if let Some(cell) = frame.buffer_mut().cell_mut((
-                    area.x
-                        .saturating_add(u16::try_from(x * 2 + half).unwrap_or(0)),
-                    area.y.saturating_add(u16::try_from(y).unwrap_or(0)),
-                )) {
-                    cell.set_symbol(" ").set_bg(color);
-                }
+            if let Some(cell) = frame.buffer_mut().cell_mut((
+                area.x.saturating_add(u16::try_from(x).unwrap_or(0)),
+                area.y.saturating_add(u16::try_from(y).unwrap_or(0)),
+            )) {
+                cell.set_symbol(&glyph.to_string()).set_fg(theme.muted);
             }
         }
     }
@@ -3420,6 +3427,14 @@ pub enum TuiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_of_life_uses_small_braille_subcells() {
+        let mut cells = vec![false; 8];
+        cells[0] = true;
+        cells[7] = true;
+        assert_eq!(life_braille(&cells, 2, 0, 0), '⢁');
+    }
 
     #[test]
     fn game_of_life_blinker_keeps_evolving() {
