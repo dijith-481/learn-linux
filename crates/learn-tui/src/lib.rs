@@ -319,6 +319,205 @@ struct PetState {
     facing_right: bool,
 }
 
+#[derive(Debug, Clone, Default)]
+struct KeyboardState {
+    last: Option<(KeyCode, KeyModifiers, Duration)>,
+    recent: String,
+    typed_at: Vec<Duration>,
+}
+
+impl KeyboardState {
+    fn record(&mut self, code: KeyCode, modifiers: KeyModifiers, now: Duration) {
+        self.last = Some((code, modifiers, now));
+        match code {
+            KeyCode::Char(character) if !modifiers.contains(KeyModifiers::CONTROL) => {
+                self.recent.push(character);
+                self.typed_at.push(now);
+                self.typed_at
+                    .retain(|time| now.saturating_sub(*time) <= Duration::from_secs(30));
+            }
+            KeyCode::Backspace => {
+                self.recent.pop();
+            }
+            KeyCode::Enter => self.recent.push('↵'),
+            KeyCode::Tab => self.recent.push('⇥'),
+            _ => {}
+        }
+        if self.recent.chars().count() > 28 {
+            self.recent = self.recent.chars().skip(1).collect();
+        }
+    }
+
+    fn wpm(&self, now: Duration) -> usize {
+        let Some(first) = self.typed_at.first() else {
+            return 0;
+        };
+        if self
+            .typed_at
+            .last()
+            .is_some_and(|last| now.saturating_sub(*last) > Duration::from_secs(4))
+        {
+            return 0;
+        }
+        let elapsed = now.saturating_sub(*first).as_secs_f64().max(3.0);
+        ((self.typed_at.len() as f64 / 5.0) * 60.0 / elapsed).round() as usize
+    }
+
+    fn active(&self, label: &str, now: Duration) -> bool {
+        let Some((code, modifiers, pressed_at)) = self.last else {
+            return false;
+        };
+        if now.saturating_sub(pressed_at) > Duration::from_millis(220) {
+            return false;
+        }
+        match label {
+            "Esc" => code == KeyCode::Esc,
+            "Back" => code == KeyCode::Backspace,
+            "Tab" => code == KeyCode::Tab,
+            "Ctrl" => modifiers.contains(KeyModifiers::CONTROL),
+            "Alt" => modifiers.contains(KeyModifiers::ALT),
+            "Shift" => {
+                modifiers.contains(KeyModifiers::SHIFT)
+                    || matches!(code, KeyCode::Char(character) if character.is_ascii_uppercase())
+            }
+            "Space" => code == KeyCode::Char(' '),
+            "Enter" => code == KeyCode::Enter,
+            "←" => code == KeyCode::Left,
+            "→" => code == KeyCode::Right,
+            _ => {
+                matches!(code, KeyCode::Char(character) if label.eq_ignore_ascii_case(&character.to_string()))
+            }
+        }
+    }
+}
+
+const KEYBOARD_HEIGHT: u16 = 15;
+
+fn keyboard_area(panel: Rect, mode: AppMode) -> Option<Rect> {
+    if mode != AppMode::Lesson {
+        return None;
+    }
+    let inner = panel_content_area(panel);
+    (inner.width >= 48 && inner.height >= KEYBOARD_HEIGHT + 6).then(|| {
+        Rect::new(
+            inner.x,
+            inner.bottom().saturating_sub(KEYBOARD_HEIGHT),
+            inner.width,
+            KEYBOARD_HEIGHT,
+        )
+    })
+}
+
+fn render_keyboard(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    keyboard: &KeyboardState,
+    now: Duration,
+    theme: Theme,
+) {
+    frame.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" KEYBOARD ")
+            .style(Style::default().bg(theme.surface))
+            .border_style(theme.muted()),
+        area,
+    );
+    let input_width = usize::from(area.width.saturating_sub(16));
+    let input = keyboard
+        .recent
+        .chars()
+        .rev()
+        .take(input_width.saturating_sub(2))
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    frame.render_widget(
+        Paragraph::new(format!("› {input}"))
+            .style(Style::default().fg(theme.accent).bg(theme.overlay)),
+        Rect::new(
+            area.x.saturating_add(2),
+            area.y.saturating_add(1),
+            area.width.saturating_sub(16),
+            1,
+        ),
+    );
+    frame.render_widget(
+        Paragraph::new(format!("{:>3} WPM", keyboard.wpm(now)))
+            .alignment(Alignment::Right)
+            .style(Style::default().fg(theme.warn)),
+        Rect::new(
+            area.right().saturating_sub(12),
+            area.y.saturating_add(1),
+            10,
+            1,
+        ),
+    );
+    const ROWS: [&[&str]; 5] = [
+        &[
+            "Esc", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "=", "Back",
+        ],
+        &[
+            "Tab", "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "[", "]", r"\",
+        ],
+        &[
+            "Caps", "A", "S", "D", "F", "G", "H", "J", "K", "L", ";", "'", "Enter",
+        ],
+        &[
+            "Shift", "Z", "X", "C", "V", "B", "N", "M", ",", ".", "/", "Shift",
+        ],
+        &[
+            "Ctrl", "Win", "Alt", "Space", "Alt", "Win", "Menu", "Ctrl", "←", "→",
+        ],
+    ];
+    let base_x = area.x.saturating_add(area.width.saturating_sub(46) / 2);
+    for (row, keys) in ROWS.iter().enumerate() {
+        let y = area
+            .y
+            .saturating_add(3 + u16::try_from(row).unwrap_or(0) * 2);
+        let mut x = base_x.saturating_add(u16::try_from(row.min(3)).unwrap_or(0));
+        for label in *keys {
+            let width = match *label {
+                "Esc" | "Back" | "Tab" | "Ctrl" | "Menu" => 4,
+                "Caps" | "Enter" | "Shift" => 5,
+                "Space" => 8,
+                "Win" | "Alt" => 3,
+                _ => 2,
+            };
+            if x.saturating_add(width) >= area.right().saturating_sub(1) {
+                break;
+            }
+            let active = keyboard.active(label, now);
+            let face = if active {
+                Style::default()
+                    .fg(theme.selected_fg)
+                    .bg(theme.accent)
+                    .bold()
+            } else {
+                Style::default().fg(theme.fg).bg(theme.overlay)
+            };
+            let shadow = if active { theme.warn } else { theme.backdrop };
+            frame.render_widget(
+                Paragraph::new(*label)
+                    .alignment(Alignment::Center)
+                    .style(face),
+                Rect::new(x, y, width, 1),
+            );
+            frame.render_widget(
+                Block::default().style(Style::default().bg(shadow)),
+                Rect::new(
+                    x.saturating_add(1),
+                    y.saturating_add(1),
+                    width.saturating_sub(1),
+                    1,
+                ),
+            );
+            x = x.saturating_add(width + 1);
+        }
+    }
+}
+
 const PET_WIDTH: u16 = 14;
 const PET_HEIGHT: u16 = 6;
 const PET_STEP: Duration = Duration::from_millis(850);
@@ -480,6 +679,7 @@ async fn app_loop(
     let mut effects: EffectManager<()> = EffectManager::default();
     let mut last_frame = Instant::now();
     let mut animation_time = Duration::ZERO;
+    let mut progress_started: Option<Duration> = None;
     let mut completed = false;
     let mut score = 0_usize;
     let mut hint_level = 0_usize;
@@ -496,6 +696,7 @@ async fn app_loop(
     let mut theme_id = ThemeId::Default;
     let mut pet_enabled = false;
     let mut pet = PetState::default();
+    let mut keyboard = KeyboardState::default();
     let mut rain_enabled = false;
     let mut palette_index = 0_usize;
     let mut palette_query = String::new();
@@ -590,6 +791,7 @@ async fn app_loop(
             )
             .await?;
             if advanced {
+                progress_started = Some(animation_time);
                 if let Some(challenge) = selected_challenge.as_ref() {
                     terminal_history
                         .extend(next_challenge_history_lines(challenge, theme_id.theme()));
@@ -608,6 +810,7 @@ async fn app_loop(
             daemon,
             selected_challenge.as_ref(),
             selected_index,
+            progress_started,
             session.is_some() || rpc_session_id.is_some(),
             mode,
             start_transition,
@@ -622,6 +825,7 @@ async fn app_loop(
             focus,
             pet_enabled,
             &pet,
+            &keyboard,
             rain_enabled,
             animation_time,
             elapsed,
@@ -636,6 +840,7 @@ async fn app_loop(
                     if key.kind != KeyEventKind::Press {
                         continue;
                     }
+                    keyboard.record(key.code, key.modifiers, animation_time);
                     if let Some(panel) = panel_focus_key(key.code, key.modifiers) {
                         focus = panel;
                         mode = AppMode::Lesson;
@@ -1227,6 +1432,7 @@ fn draw_ui(
     daemon: &Daemon,
     selected_challenge: Option<&learn_challenge::CompiledChallenge>,
     selected_index: usize,
+    progress_started: Option<Duration>,
     session_active: bool,
     mode: AppMode,
     start_transition: Option<Duration>,
@@ -1241,11 +1447,12 @@ fn draw_ui(
     focus: PanelFocus,
     pet_enabled: bool,
     pet: &PetState,
+    keyboard: &KeyboardState,
     rain_enabled: bool,
     animation_time: Duration,
     elapsed: Duration,
     effects: &mut EffectManager<()>,
-    _animations_enabled: bool,
+    animations_enabled: bool,
     vim_dojo: &VimDojo,
     theme: Theme,
 ) -> Result<(), TuiError> {
@@ -1277,13 +1484,16 @@ fn draw_ui(
                 frame.render_widget(snake, area);
                 return;
             }
-            let right_width = if mode == AppMode::Challenges { 36 } else { 28 };
+            let right_columns = if mode == AppMode::Challenges {
+                area.width.saturating_mul(36) / 100
+            } else if area.width >= 118 {
+                (area.width.saturating_mul(28) / 100).max(52)
+            } else {
+                area.width.saturating_mul(28) / 100
+            };
             let columns = Layout::default()
                 .direction(Direction::Horizontal)
-                .constraints([
-                    Constraint::Percentage(100 - right_width),
-                    Constraint::Percentage(right_width),
-                ])
+                .constraints([Constraint::Min(0), Constraint::Length(right_columns)])
                 .split(area);
             let left_sections = Layout::default()
                 .direction(Direction::Vertical)
@@ -1356,6 +1566,9 @@ fn draw_ui(
                     brief_inner,
                     selected_index,
                     daemon.content.challenges.len(),
+                    progress_started,
+                    animation_time,
+                    animations_enabled,
                     theme,
                 );
             }
@@ -1390,7 +1603,7 @@ fn draw_ui(
             if pet_enabled && mode == AppMode::Lesson {
                 render_terminal_pet(frame, left_sections[1], pet, theme);
             }
-            let right_lines = match mode {
+            let mut right_lines = match mode {
                 AppMode::Palette => palette_lines(palette_query, palette_index, theme),
                 AppMode::Vim => vim_dojo.side_lines(theme),
                 AppMode::Challenges => challenge_lines(
@@ -1420,6 +1633,14 @@ fn draw_ui(
                 AppMode::Start => Vec::new(),
                 AppMode::Lesson => docs_sidebar_lines(docs_query, docs_results, theme),
             };
+            let keyboard_rect = keyboard_area(columns[1], mode);
+            if let Some(keyboard_rect) = keyboard_rect {
+                right_lines.truncate(usize::from(
+                    keyboard_rect
+                        .y
+                        .saturating_sub(columns[1].y.saturating_add(2)),
+                ));
+            }
             let right_block = Block::default()
                 .borders(Borders::ALL)
                 .style(Style::default().bg(theme.surface))
@@ -1433,6 +1654,9 @@ fn draw_ui(
                 .block(right_block)
                 .wrap(Wrap { trim: true });
             frame.render_widget(right, columns[1]);
+            if let Some(keyboard_rect) = keyboard_rect {
+                render_keyboard(frame, keyboard_rect, keyboard, animation_time, theme);
+            }
             if mode == AppMode::Palette {
                 render_palette_overlay(frame, area, palette_query, palette_index, theme);
             }
@@ -2186,6 +2410,9 @@ fn render_level_progress(
     area: Rect,
     selected_index: usize,
     total: usize,
+    started: Option<Duration>,
+    now: Duration,
+    animations_enabled: bool,
     theme: Theme,
 ) {
     if area.width == 0 || area.height < 2 || total == 0 {
@@ -2205,14 +2432,41 @@ fn render_level_progress(
         Paragraph::new(label),
         Rect::new(area.x, label_y, area.width, 1),
     );
-    let gauge = Gauge::default()
-        .gauge_style(Style::default().fg(theme.accent).bg(theme.overlay))
-        .ratio(completed as f64 / total as f64)
-        .label("");
+    let motion = if animations_enabled {
+        started.map(|start| (now.saturating_sub(start).as_secs_f64() / 0.72).clamp(0.0, 1.0))
+    } else {
+        None
+    };
+    let eased = motion.map_or(1.0, |phase| 1.0 - (1.0 - phase).powi(3));
+    let displayed = if motion.is_some() && completed > 0 {
+        (completed - 1) as f64 + eased
+    } else {
+        completed as f64
+    };
+    let ratio = displayed / total as f64;
+    let bar = Rect::new(area.x, label_y.saturating_add(1), area.width, 1);
     frame.render_widget(
-        gauge,
-        Rect::new(area.x, label_y.saturating_add(1), area.width, 1),
+        Gauge::default()
+            .gauge_style(Style::default().fg(theme.success).bg(theme.overlay))
+            .ratio(ratio)
+            .label(""),
+        bar,
     );
+    let filled = (ratio * f64::from(bar.width)).round() as u16;
+    let buffer = frame.buffer_mut();
+    for column in 0..filled.min(bar.width) {
+        if let Some(cell) = buffer.cell_mut((bar.x.saturating_add(column), bar.y)) {
+            let from_tip = filled.saturating_sub(column);
+            let color = if motion.is_some_and(|phase| phase < 1.0) && from_tip <= 2 {
+                theme.warn
+            } else if from_tip <= 5 {
+                theme.accent
+            } else {
+                theme.success
+            };
+            cell.set_bg(color);
+        }
+    }
 }
 
 fn challenge_brief_lines(
@@ -2281,15 +2535,32 @@ fn append_terminal_snapshot(
     width: u16,
     theme: Theme,
 ) {
-    let snapshot = terminal_lines_with_cursor(parser, width, false, theme);
-    let Some(last_non_empty) = snapshot.iter().rposition(|line| {
+    let mut snapshot = terminal_lines_with_cursor(parser, width, false, theme);
+    while snapshot
+        .last()
+        .is_some_and(|line| line.spans.iter().all(|span| span.content.trim().is_empty()))
+    {
+        snapshot.pop();
+    }
+    let text = |line: &Line<'_>| {
         line.spans
             .iter()
-            .any(|span| !span.content.trim().is_empty())
-    }) else {
-        return;
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
     };
-    history.extend(snapshot.into_iter().take(last_non_empty + 1));
+    if snapshot
+        .last()
+        .is_some_and(|line| text(line).trim_start().starts_with('❯'))
+    {
+        snapshot.pop();
+        if snapshot
+            .last()
+            .is_some_and(|line| text(line).contains("learner@learn"))
+        {
+            snapshot.pop();
+        }
+    }
+    history.extend(snapshot);
 }
 
 fn next_challenge_history_lines(
@@ -2693,6 +2964,21 @@ mod tests {
         observe_command_output(b"\x07learner@learn", &mut pending, &mut hints);
         assert!(pending.is_none());
         assert_eq!(hints, 0);
+    }
+
+    #[test]
+    fn completion_snapshot_keeps_file_output_but_omits_interim_prompt() {
+        let mut parser = vt100::Parser::new(12, 60, 64);
+        parser.process(b"cat welcome.txt\r\nWelcome to a real shell.\r\nlearner@learn  ~  \xe2\x97\x88\r\n\xe2\x9d\xaf ");
+        let mut history = Vec::new();
+        append_terminal_snapshot(&mut history, &parser, 60, ThemeId::Default.theme());
+        let transcript = history
+            .iter()
+            .flat_map(|line| line.spans.iter())
+            .map(|span| span.content.as_ref())
+            .collect::<String>();
+        assert!(transcript.contains("Welcome to a real shell."));
+        assert!(!transcript.contains("learner@learn"));
     }
 
     #[test]

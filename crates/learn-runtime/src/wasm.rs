@@ -107,6 +107,21 @@ impl WasmSession {
         verify_virtual_expression(&state.shell, expression)
     }
 
+    /// Commands entered in this lesson, for continuity across challenges.
+    pub fn command_history(&self) -> Vec<Vec<u8>> {
+        self.state
+            .lock()
+            .map_or_else(|_| Vec::new(), |state| state.history.clone())
+    }
+
+    /// Restore commands from the preceding lesson.
+    pub fn set_command_history(&self, history: Vec<Vec<u8>>) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().map_err(|_| RuntimeError::Poisoned)?;
+        state.history = history;
+        state.history_cursor = None;
+        Ok(())
+    }
+
     fn current_directory(&self) -> String {
         self.state.lock().map_or_else(
             |_| "/home/learner".to_owned(),
@@ -129,8 +144,30 @@ pub fn start_wasm_session(
     challenge_id: &str,
     setup: &[SetupAction],
     environment: &EnvironmentSpec,
+    columns: u16,
+    rows: u16,
+) -> Result<WasmSession, RuntimeError> {
+    start_wasm_session_with_intro(challenge_id, setup, environment, columns, rows, true)
+}
+
+/// Start a later lesson without replaying the initial startup art.
+pub fn start_wasm_session_quiet(
+    challenge_id: &str,
+    setup: &[SetupAction],
+    environment: &EnvironmentSpec,
+    columns: u16,
+    rows: u16,
+) -> Result<WasmSession, RuntimeError> {
+    start_wasm_session_with_intro(challenge_id, setup, environment, columns, rows, false)
+}
+
+fn start_wasm_session_with_intro(
+    challenge_id: &str,
+    setup: &[SetupAction],
+    environment: &EnvironmentSpec,
     _columns: u16,
     _rows: u16,
+    show_intro: bool,
 ) -> Result<WasmSession, RuntimeError> {
     if wasm_bundle_version()? != WASM_GUEST_ABI_VERSION {
         return Err(RuntimeError::Wasm(
@@ -144,6 +181,8 @@ pub fn start_wasm_session(
     let state = Arc::new(Mutex::new(SessionState {
         shell,
         input: Vec::new(),
+        history: Vec::new(),
+        history_cursor: None,
         cursor: 0,
         escape: Vec::new(),
         closed: false,
@@ -154,7 +193,9 @@ pub fn start_wasm_session(
         output: Arc::clone(&output),
         reader: Some(Box::new(OutputReader::new(output))),
     };
-    session.output.push(startup_fetch(challenge_id).as_bytes());
+    if show_intro {
+        session.output.push(startup_fetch(challenge_id).as_bytes());
+    }
     session
         .output
         .push(prompt(&session.current_directory()).as_bytes());
@@ -175,6 +216,8 @@ fn validate_virtual_environment(environment: &EnvironmentSpec) -> Result<(), Run
 struct SessionState {
     shell: VirtualShell,
     input: Vec<u8>,
+    history: Vec<Vec<u8>>,
+    history_cursor: Option<usize>,
     cursor: usize,
     escape: Vec<u8>,
     closed: bool,
@@ -197,15 +240,27 @@ impl SessionState {
                 } else {
                     let command = String::from_utf8_lossy(&self.input).into_owned();
                     let should_close = command.split_ascii_whitespace().next() == Some("exit");
+                    if self
+                        .history
+                        .last()
+                        .is_none_or(|previous| previous != &self.input)
+                    {
+                        self.history.push(self.input.clone());
+                    }
+                    self.history_cursor = None;
                     self.input.clear();
                     self.cursor = 0;
                     output.push(b"\r\n");
                     let result = self.shell.execute_line(&command);
                     if !result.output.is_empty() {
                         output.push(&result.output);
+                        if !result.output.ends_with(b"\n") && !result.output.starts_with(b"\x1b[2J")
+                        {
+                            output.push(b"\r\n");
+                        }
                     }
                     if result.status != 0 {
-                        output.push(format!("\r\n[exit {}]", result.status).as_bytes());
+                        output.push(format!("[exit {}]\r\n", result.status).as_bytes());
                     }
                     if should_close && result.status == 0 {
                         self.closed = true;
@@ -269,6 +324,8 @@ impl SessionState {
         match byte {
             b'D' => self.move_left(output),
             b'C' => self.move_right(output),
+            b'A' => self.history_up(output),
+            b'B' => self.history_down(output),
             b'H' => {
                 self.cursor = 0;
                 self.redraw_input(output);
@@ -294,6 +351,39 @@ impl SessionState {
         self.cursor = next_boundary(&self.input, self.cursor);
         output.push(b"\x1b[C");
         self.escape.clear();
+    }
+
+    fn history_up(&mut self, output: &OutputBuffer) {
+        if self.history.is_empty() {
+            self.escape.clear();
+            return;
+        }
+        let index = self
+            .history_cursor
+            .map_or(self.history.len().saturating_sub(1), |index| {
+                index.saturating_sub(1)
+            });
+        self.history_cursor = Some(index);
+        self.input.clone_from(&self.history[index]);
+        self.cursor = self.input.len();
+        self.redraw_input(output);
+    }
+
+    fn history_down(&mut self, output: &OutputBuffer) {
+        let Some(index) = self.history_cursor else {
+            self.escape.clear();
+            return;
+        };
+        if index + 1 < self.history.len() {
+            let next = index + 1;
+            self.history_cursor = Some(next);
+            self.input.clone_from(&self.history[next]);
+        } else {
+            self.history_cursor = None;
+            self.input.clear();
+        }
+        self.cursor = self.input.len();
+        self.redraw_input(output);
     }
 
     fn complete(&mut self, output: &OutputBuffer) {
@@ -511,11 +601,19 @@ impl VirtualShell {
         let mut input = Vec::new();
         let mut status = 0;
         let mut output = Vec::new();
-        for pipeline in split_unquoted(line, '|') {
+        let pipelines = split_unquoted(line, '|');
+        if pipelines.iter().any(|pipeline| pipeline.is_empty()) {
+            return CommandResult::failure("learn: a pipe needs a command on both sides");
+        }
+        let pipeline_count = pipelines.len();
+        for (index, pipeline) in pipelines.into_iter().enumerate() {
             let (argv, stdin_path, stdout_path) = match parse_segment(&pipeline) {
                 Ok(value) => value,
                 Err(error) => return CommandResult::failure(error),
             };
+            if argv.is_empty() {
+                return CommandResult::failure("learn: expected a command in the pipeline");
+            }
             if let Some(path) = stdin_path {
                 match self
                     .resolve(&path)
@@ -525,7 +623,7 @@ impl VirtualShell {
                     Err(error) => return CommandResult::failure(error),
                 }
             }
-            let result = self.run_command(&argv, &input);
+            let result = self.run_command(&argv, &input, index + 1 < pipeline_count);
             status = result.status;
             output = result.output;
             if let Some((path, append)) = stdout_path {
@@ -544,7 +642,7 @@ impl VirtualShell {
         CommandResult { output, status }
     }
 
-    fn run_command(&mut self, argv: &[String], input: &[u8]) -> CommandResult {
+    fn run_command(&mut self, argv: &[String], input: &[u8], piped_output: bool) -> CommandResult {
         let Some(command) = argv.first() else {
             return CommandResult::success(Vec::new());
         };
@@ -575,7 +673,7 @@ impl VirtualShell {
             "rm" => self.command_rm(&argv[1..]),
             "grep" => self.command_grep(&argv[1..], input),
             "find" => self.command_find(&argv[1..]),
-            "ls" => self.command_ls(&argv[1..]),
+            "ls" => self.command_ls(&argv[1..], piped_output),
             "head" => self.command_head(&argv[1..], input),
             "wc" => CommandResult::success(format!("{}\n", input.len()).into_bytes()),
             _ => CommandResult::failure(format!("learn: command '{command}' not found")),
@@ -606,13 +704,23 @@ impl VirtualShell {
             .map(|command| (command.to_owned(), false))
             .collect();
         }
+        let typed_parent = token
+            .rsplit_once('/')
+            .map_or_else(String::new, |(parent, _)| format!("{parent}/"));
+        let typed_leaf = token.rsplit('/').next().unwrap_or(token);
         let mut candidates = self
             .fs
             .iter()
             .filter_map(|(path, node)| {
                 let directory = matches!(node, Node::Directory);
                 let display = completion_path(path, token, &self.cwd)?;
-                display.starts_with(token).then_some((display, directory))
+                let remainder = display.strip_prefix(&typed_parent)?;
+                let (component, has_more) = remainder
+                    .split_once('/')
+                    .map_or((remainder, false), |(component, _)| (component, true));
+                component
+                    .starts_with(typed_leaf)
+                    .then(|| (format!("{typed_parent}{component}"), directory || has_more))
             })
             .collect::<Vec<_>>();
         candidates.sort();
@@ -834,8 +942,9 @@ impl VirtualShell {
             .split_inclusive(|byte| *byte == b'\n')
             .filter(|line| String::from_utf8_lossy(line).contains(pattern))
             .flat_map(ToOwned::to_owned)
-            .collect();
-        CommandResult::success(output)
+            .collect::<Vec<_>>();
+        let status = i32::from(output.is_empty());
+        CommandResult { output, status }
     }
 
     fn command_find(&self, argv: &[String]) -> CommandResult {
@@ -864,7 +973,7 @@ impl VirtualShell {
         CommandResult::success(format!("{}\n", matches.join("\n")).into_bytes())
     }
 
-    fn command_ls(&self, argv: &[String]) -> CommandResult {
+    fn command_ls(&self, argv: &[String], piped_output: bool) -> CommandResult {
         let path = argv.first().map_or(self.cwd.as_str(), String::as_str);
         let path = match self.resolve(path) {
             Ok(path) => path,
@@ -894,7 +1003,16 @@ impl VirtualShell {
                 }
             })
             .collect::<Vec<_>>();
-        CommandResult::success(pretty_columns(&values, 3).into_bytes())
+        if piped_output {
+            let output = if values.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", values.join("\n"))
+            };
+            CommandResult::success(output.into_bytes())
+        } else {
+            CommandResult::success(pretty_columns(&values, 3).into_bytes())
+        }
     }
 
     fn command_head(&self, argv: &[String], input: &[u8]) -> CommandResult {
@@ -1117,14 +1235,7 @@ fn completion_path(path: &str, token: &str, cwd: &str) -> Option<String> {
     if token.starts_with('/') {
         return Some(path.to_owned());
     }
-    if let Some(relative) = path.strip_prefix(&format!("{cwd}/")) {
-        return Some(relative.to_owned());
-    }
-    Some(
-        path.strip_prefix("/home/learner/")
-            .unwrap_or(path)
-            .to_owned(),
-    )
+    path.strip_prefix(&format!("{cwd}/")).map(str::to_owned)
 }
 
 fn pretty_columns(values: &[String], columns: usize) -> String {
@@ -1225,7 +1336,18 @@ fn split_unquoted(value: &str, delimiter: char) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut quote = None;
+    let mut escaped = false;
     for character in value.chars() {
+        if escaped {
+            current.push(character);
+            escaped = false;
+            continue;
+        }
+        if character == '\\' && quote != Some('\'') {
+            current.push(character);
+            escaped = true;
+            continue;
+        }
         match (quote, character) {
             (None, '\'' | '"') => {
                 quote = Some(character);
@@ -1569,6 +1691,35 @@ mod tests {
     }
 
     #[test]
+    fn later_lesson_starts_without_repeating_the_fetch() {
+        let mut session =
+            start_wasm_session_quiet("later", &[], &EnvironmentSpec::default(), 80, 24)
+                .expect("session starts");
+        let mut reader = session.take_reader().expect("reader is available");
+        session.write(b"\x04").expect("session closes");
+        let mut output = String::new();
+        reader.read_to_string(&mut output).expect("read output");
+        assert!(!output.contains("LINUX SHELL DOJO"));
+        assert!(output.contains("learner@learn"));
+    }
+
+    #[test]
+    fn file_output_appears_before_the_following_prompt() {
+        let setup = [SetupAction::WriteFile {
+            path: SandboxPath::parse("~/welcome.txt").expect("path"),
+            contents: b"Welcome to a real shell.".to_vec(),
+        }];
+        let mut session = session(&setup);
+        let mut reader = session.take_reader().expect("reader is available");
+        session
+            .write(b"cat welcome.txt\r\x04")
+            .expect("command accepted");
+        let mut output = String::new();
+        reader.read_to_string(&mut output).expect("read output");
+        assert!(output.contains("Welcome to a real shell.\r\n\r\x1b]777"));
+    }
+
+    #[test]
     fn startup_fetch_and_starship_prompt_are_emitted_once() {
         let mut session = session(&[]);
         let mut reader = session.take_reader().expect("reader is available");
@@ -1671,6 +1822,33 @@ mod tests {
                     )),
                 ]))
                 .expect("verification")
+        );
+    }
+
+    #[test]
+    fn command_history_survives_a_new_lesson_session() {
+        let previous = session(&[]);
+        previous.write(b"pwd\r").expect("command accepted");
+        let next = session(&[]);
+        next.set_command_history(previous.command_history())
+            .expect("history restored");
+        next.write(b"\x1b[A").expect("up arrow accepted");
+        let state = next.state.lock().expect("session state");
+        assert_eq!(state.input, b"pwd");
+    }
+
+    #[test]
+    fn completion_only_lists_immediate_children() {
+        let mut shell = VirtualShell::new(EnvironmentSpec::default());
+        assert_eq!(shell.execute_line("mkdir reports").status, 0);
+        assert_eq!(shell.execute_line("touch reports/one.log").status, 0);
+        assert_eq!(
+            shell.completion_candidates("repor", false),
+            vec![("reports".to_owned(), true)]
+        );
+        assert_eq!(
+            shell.completion_candidates("reports/o", false),
+            vec![("reports/one.log".to_owned(), false)]
         );
     }
 
