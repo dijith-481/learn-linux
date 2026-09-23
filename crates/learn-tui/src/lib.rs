@@ -25,15 +25,13 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Padding, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Gauge, Padding, Paragraph, Wrap},
 };
 use tachyonfx::{EffectManager, Interpolation, fx};
 use thiserror::Error;
 
-mod terminal_image;
 mod theme;
 mod vim_dojo;
-use terminal_image::CatAnimation;
 use theme::{Theme, ThemeId};
 use vim_dojo::VimDojo;
 
@@ -69,7 +67,7 @@ struct PaletteEntry {
     keywords: &'static str,
 }
 
-const PALETTE_ENTRIES: [PaletteEntry; 15] = [
+const PALETTE_ENTRIES: [PaletteEntry; 30] = [
     PaletteEntry {
         command: PaletteCommand::Docs,
         label: "Search local docs",
@@ -139,6 +137,81 @@ const PALETTE_ENTRIES: [PaletteEntry; 15] = [
         command: PaletteCommand::SetTheme(ThemeId::EverforestLight),
         label: "Theme: Everforest Light",
         keywords: "theme everforest light bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::CatppuccinLatte),
+        label: "Theme: Catppuccin Latte",
+        keywords: "theme catppuccin latte light bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::NordLight),
+        label: "Theme: Nord Light",
+        keywords: "theme nord light snow arctic bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::TokyoNightLight),
+        label: "Theme: Tokyo Night Light",
+        keywords: "theme tokyo night light bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Gruvbox),
+        label: "Theme: Gruvbox",
+        keywords: "theme gruvbox retro warm dark",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::GruvboxLight),
+        label: "Theme: Gruvbox Light",
+        keywords: "theme gruvbox light retro warm bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Dracula),
+        label: "Theme: Dracula",
+        keywords: "theme dracula purple vampire",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::RosePine),
+        label: "Theme: Rosé Pine",
+        keywords: "theme rose pine moody elegant",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::SolarizedDark),
+        label: "Theme: Solarized Dark",
+        keywords: "theme solarized dark eclipse",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::SolarizedLight),
+        label: "Theme: Solarized Light",
+        keywords: "theme solarized light sun bright",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::OneDark),
+        label: "Theme: One Dark",
+        keywords: "theme one dark atom",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Monokai),
+        label: "Theme: Monokai",
+        keywords: "theme monokai classic neon",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Kanagawa),
+        label: "Theme: Kanagawa",
+        keywords: "theme kanagawa wave japanese",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Ayu),
+        label: "Theme: Ayu Dark",
+        keywords: "theme ayu dark minimal",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::Palenight),
+        label: "Theme: Palenight",
+        keywords: "theme palenight material purple",
+    },
+    PaletteEntry {
+        command: PaletteCommand::SetTheme(ThemeId::NightOwl),
+        label: "Theme: Night Owl",
+        keywords: "theme night owl dark blue",
     },
     PaletteEntry {
         command: PaletteCommand::Quit,
@@ -246,8 +319,8 @@ struct PetState {
     facing_right: bool,
 }
 
-const PET_WIDTH: u16 = 16;
-const PET_HEIGHT: u16 = 9;
+const PET_WIDTH: u16 = 14;
+const PET_HEIGHT: u16 = 6;
 const PET_STEP: Duration = Duration::from_millis(850);
 
 impl Default for PetState {
@@ -312,6 +385,11 @@ impl PetState {
 
 fn app_leader(code: KeyCode, modifiers: KeyModifiers) -> bool {
     code == KeyCode::Char(' ') && modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// `Ctrl-T` cycles through the built-in themes from any mode.
+fn theme_cycle_key(code: KeyCode, modifiers: KeyModifiers) -> bool {
+    matches!(code, KeyCode::Char('t' | 'T')) && modifiers.contains(KeyModifiers::CONTROL)
 }
 
 fn panel_focus_key(code: KeyCode, modifiers: KeyModifiers) -> Option<PanelFocus> {
@@ -406,6 +484,7 @@ async fn app_loop(
     let mut score = 0_usize;
     let mut hint_level = 0_usize;
     let mut shell_input = String::new();
+    let mut pending_hint_output: Option<Vec<u8>> = None;
     let mut terminal_history = Vec::new();
     let mut course_complete = false;
     let mut animations_enabled = true;
@@ -417,10 +496,6 @@ async fn app_loop(
     let mut theme_id = ThemeId::Default;
     let mut pet_enabled = false;
     let mut pet = PetState::default();
-    let mut cat_animation = CatAnimation::load(
-        Rect::new(0, 0, PET_WIDTH, PET_HEIGHT),
-        theme_id.theme().surface,
-    )?;
     let mut rain_enabled = false;
     let mut palette_index = 0_usize;
     let mut palette_query = String::new();
@@ -451,6 +526,7 @@ async fn app_loop(
             pet.tick(elapsed, pane_columns);
         }
         while let Ok(data) = output_receiver.try_recv() {
+            observe_command_output(&data, &mut pending_hint_output, &mut hint_level);
             parser.process(&data);
         }
         // `exit` closes the embedded terminal session.  A closed shell is
@@ -466,6 +542,11 @@ async fn app_loop(
         }
         if let Some(client) = client.as_mut() {
             while let Some(envelope) = client.poll_event(Duration::from_millis(1)).await? {
+                if let Some(envelope::Body::Event(event)) = envelope.body.as_ref()
+                    && let Some(protocol_event::Kind::TerminalOutput(output)) = event.kind.as_ref()
+                {
+                    observe_command_output(&output.data, &mut pending_hint_output, &mut hint_level);
+                }
                 let was_completed = completed;
                 process_event(
                     &envelope,
@@ -480,26 +561,20 @@ async fn app_loop(
                 }
             }
         }
-        if completed && !course_complete {
+        if completed && pending_hint_output.is_none() && !course_complete {
             append_terminal_snapshot(
                 &mut terminal_history,
                 &parser,
                 pane_columns,
                 theme_id.theme(),
             );
-            {
-                let next_title = daemon
-                    .content
-                    .challenges
-                    .get(selected_index.saturating_add(1))
-                    .map(|challenge| challenge.spec.meta.title.as_str());
-                terminal_history.extend(completion_lines(
-                    selected_challenge.as_ref(),
-                    next_title,
-                    score,
-                    theme_id.theme(),
-                ));
-            }
+            terminal_history.extend(completion_lines(
+                selected_challenge.as_ref(),
+                score,
+                daemon.content.challenges.len(),
+                pane_columns,
+                theme_id.theme(),
+            ));
             let advanced = advance_to_next_challenge(
                 daemon,
                 &mut selected_index,
@@ -525,6 +600,7 @@ async fn app_loop(
             }
             focus = PanelFocus::Left;
             hint_level = 0;
+            pending_hint_output = None;
             shell_input.clear();
         }
         draw_ui(
@@ -546,7 +622,6 @@ async fn app_loop(
             focus,
             pet_enabled,
             &pet,
-            &cat_animation,
             rain_enabled,
             animation_time,
             elapsed,
@@ -579,6 +654,10 @@ async fn app_loop(
                             palette_index = 0;
                             palette_query.clear();
                         }
+                        continue;
+                    }
+                    if theme_cycle_key(key.code, key.modifiers) {
+                        theme_id = theme_id.next();
                         continue;
                     }
                     if mode == AppMode::Lesson && focus == PanelFocus::Left {
@@ -693,10 +772,6 @@ async fn app_loop(
                                         }
                                         PaletteCommand::SetTheme(selected_theme) => {
                                             theme_id = selected_theme;
-                                            cat_animation = CatAnimation::load(
-                                                Rect::new(0, 0, PET_WIDTH, PET_HEIGHT),
-                                                theme_id.theme().surface,
-                                            )?;
                                             mode = AppMode::Lesson;
                                         }
                                         PaletteCommand::Quit => break,
@@ -846,6 +921,12 @@ async fn app_loop(
                         _ if session.is_some() || rpc_session_id.is_some() => {
                             let submitted_command =
                                 track_shell_input(&mut shell_input, key.code, key.modifiers);
+                            if submitted_command
+                                .as_ref()
+                                .is_some_and(|command| !command.trim().is_empty())
+                            {
+                                pending_hint_output = Some(Vec::new());
+                            }
                             if let Some(bytes) = key_bytes(key.code, key.modifiers) {
                                 if let Some(client) = client.as_mut() {
                                     client
@@ -871,6 +952,7 @@ async fn app_loop(
                                     });
                                 if verified {
                                     if let Some(challenge) = selected_challenge.as_ref() {
+                                        hint_level = 0;
                                         daemon.complete_challenge(&challenge.spec.id)?;
                                     }
                                     completed = true;
@@ -880,7 +962,8 @@ async fn app_loop(
                                     .is_some_and(|command| !command.trim().is_empty())
                                     && !completed
                                 {
-                                    hint_level = hint_level.saturating_add(1);
+                                    hint_level = 0;
+                                    pending_hint_output = Some(Vec::new());
                                 }
                             }
                         }
@@ -941,13 +1024,20 @@ async fn advance_to_next_challenge(
             .await?;
         *rpc_session_id = Some(opened.session_id);
     } else {
-        *session = Some(start_wasm_session(
+        let history = session
+            .as_ref()
+            .map(learn_runtime::WasmSession::command_history);
+        let next_session = learn_runtime::start_wasm_session_quiet(
             challenge.spec.id.as_str(),
             &challenge.spec.setup,
             &challenge.spec.environment,
             pane_columns,
             pane_rows,
-        )?);
+        )?;
+        if let Some(history) = history {
+            next_session.set_command_history(history)?;
+        }
+        *session = Some(next_session);
         if let Some(session) = session.as_mut() {
             spawn_output_reader(session, output_sender)?;
         }
@@ -1066,6 +1156,42 @@ fn process_event(
     }
 }
 
+fn observe_command_output(
+    data: &[u8],
+    pending_output: &mut Option<Vec<u8>>,
+    hint_level: &mut usize,
+) {
+    let Some(response) = pending_output.as_mut() else {
+        return;
+    };
+    response.extend_from_slice(data);
+    if response.len() > 4096 {
+        let excess = response.len() - 4096;
+        response.drain(..excess);
+    }
+    if let Some(status) = command_exit_status(response) {
+        if status != 0 {
+            *hint_level = hint_level.saturating_add(1);
+        }
+        *pending_output = None;
+    } else if response
+        .windows(b"\x07learner@learn".len())
+        .any(|window| window == b"\x07learner@learn")
+    {
+        *pending_output = None;
+    }
+}
+
+fn command_exit_status(output: &[u8]) -> Option<i32> {
+    let marker = b"[exit ";
+    let start = output
+        .windows(marker.len())
+        .rposition(|window| window == marker)?
+        + marker.len();
+    let end = output[start..].iter().position(|byte| *byte == b']')? + start;
+    std::str::from_utf8(&output[start..end]).ok()?.parse().ok()
+}
+
 fn track_shell_input(input: &mut String, code: KeyCode, modifiers: KeyModifiers) -> Option<String> {
     if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
         input.clear();
@@ -1115,7 +1241,6 @@ fn draw_ui(
     focus: PanelFocus,
     pet_enabled: bool,
     pet: &PetState,
-    cat_animation: &CatAnimation,
     rain_enabled: bool,
     animation_time: Duration,
     elapsed: Duration,
@@ -1162,11 +1287,11 @@ fn draw_ui(
                 .split(area);
             let left_sections = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Percentage(20), Constraint::Percentage(80)])
+                .constraints([Constraint::Length(9), Constraint::Min(0)])
                 .split(columns[0]);
             let brief_lines = challenge_brief_lines(selected_challenge, theme);
             let runtime_text = daemon.runtime.render();
-            let terminal_lines = if mode == AppMode::Vim {
+            let mut terminal_lines = if mode == AppMode::Vim {
                 vim_dojo.main_lines(left_sections[1].width.saturating_sub(2), theme)
             } else {
                 let mut lines = terminal_history.to_vec();
@@ -1183,6 +1308,25 @@ fn draw_ui(
                 }
                 lines
             };
+            if mode == AppMode::Lesson && hint_level > 0 {
+                if let Some(hint) = selected_challenge.and_then(|challenge| {
+                    challenge
+                        .spec
+                        .hints
+                        .get(
+                            hint_level
+                                .saturating_sub(1)
+                                .min(challenge.spec.hints.len().saturating_sub(1)),
+                        )
+                        .map(|hint| hint.text.as_str())
+                }) {
+                    let speaker = if pet_enabled { "◉  " } else { "↳  " };
+                    terminal_lines.push(Line::from(vec![
+                        Span::styled(speaker, theme.accent().add_modifier(Modifier::BOLD)),
+                        Span::styled(hint.to_owned(), theme.dim()),
+                    ]));
+                }
+            }
             let brief_block = Block::default()
                 .borders(Borders::ALL)
                 .style(Style::default().bg(theme.surface))
@@ -1191,12 +1335,30 @@ fn draw_ui(
                 } else {
                     theme.muted()
                 })
-                .title(" QUEST BRIEF ")
-                .padding(Padding::uniform(1));
-            let brief = Paragraph::new(brief_lines)
-                .block(brief_block)
-                .wrap(Wrap { trim: true });
-            frame.render_widget(brief, left_sections[0]);
+                .title(" YOUR TASK ")
+                .padding(Padding::horizontal(1));
+            let brief_inner = brief_block.inner(left_sections[0]);
+            frame.render_widget(brief_block, left_sections[0]);
+            let progress_height = if brief_inner.height >= 5 { 2 } else { 0 };
+            let task_area = Rect::new(
+                brief_inner.x,
+                brief_inner.y,
+                brief_inner.width,
+                brief_inner.height.saturating_sub(progress_height),
+            );
+            frame.render_widget(
+                Paragraph::new(brief_lines).wrap(Wrap { trim: true }),
+                task_area,
+            );
+            if progress_height > 0 {
+                render_level_progress(
+                    frame,
+                    brief_inner,
+                    selected_index,
+                    daemon.content.challenges.len(),
+                    theme,
+                );
+            }
             let terminal_block = Block::default()
                 .borders(Borders::ALL)
                 .style(Style::default().bg(theme.surface))
@@ -1226,21 +1388,7 @@ fn draw_ui(
                 );
             }
             if pet_enabled && mode == AppMode::Lesson {
-                render_terminal_pet(frame, left_sections[1], pet, cat_animation);
-            }
-            if mode == AppMode::Lesson && hint_level > 0 {
-                let hint = selected_challenge.and_then(|challenge| {
-                    challenge
-                        .spec
-                        .hints
-                        .get(
-                            hint_level
-                                .saturating_sub(1)
-                                .min(challenge.spec.hints.len().saturating_sub(1)),
-                        )
-                        .map(|hint| hint.text.as_str())
-                });
-                render_inline_hint(frame, left_sections[1], hint, theme);
+                render_terminal_pet(frame, left_sections[1], pet, theme);
             }
             let right_lines = match mode {
                 AppMode::Palette => palette_lines(palette_query, palette_index, theme),
@@ -1306,8 +1454,17 @@ fn terminal_lines_with_cursor(
 ) -> Vec<Line<'static>> {
     let screen = parser.screen();
     let (cursor_row, cursor_column) = screen.cursor_position();
-    screen
-        .rows(0, width)
+    let rows = screen.rows(0, width).collect::<Vec<_>>();
+    let last_content_row = rows.iter().rposition(|row| !row.trim().is_empty());
+    let last_row = last_content_row
+        .into_iter()
+        .chain(show_cursor.then_some(usize::from(cursor_row)))
+        .max();
+    let Some(last_row) = last_row else {
+        return Vec::new();
+    };
+    rows.into_iter()
+        .take(last_row + 1)
         .enumerate()
         .map(|(row, contents)| {
             if !show_cursor || row != usize::from(cursor_row) {
@@ -1879,7 +2036,7 @@ fn render_compact_start_screen(
             .padding(Padding::uniform(1)),
     );
     frame.render_widget(body, rows[1]);
-    let footer = Paragraph::new("Ctrl-Space palette  •  Vim dojo in palette  •  Esc quit")
+    let footer = Paragraph::new("Ctrl-Space palette  •  Ctrl-T themes  •  Esc quit")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, rows[2]);
@@ -2024,12 +2181,46 @@ fn challenge_lines(
     lines
 }
 
+fn render_level_progress(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    selected_index: usize,
+    total: usize,
+    theme: Theme,
+) {
+    if area.width == 0 || area.height < 2 || total == 0 {
+        return;
+    }
+    let completed = selected_index.min(total);
+    let label_y = area.bottom().saturating_sub(2);
+    let current = selected_index.saturating_add(1).min(total);
+    let label = Line::from(vec![
+        Span::styled(
+            format!("LEVEL {current:02}  ",),
+            theme.accent().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(format!("{completed} of {total} complete"), theme.dim()),
+    ]);
+    frame.render_widget(
+        Paragraph::new(label),
+        Rect::new(area.x, label_y, area.width, 1),
+    );
+    let gauge = Gauge::default()
+        .gauge_style(Style::default().fg(theme.accent).bg(theme.overlay))
+        .ratio(completed as f64 / total as f64)
+        .label("");
+    frame.render_widget(
+        gauge,
+        Rect::new(area.x, label_y.saturating_add(1), area.width, 1),
+    );
+}
+
 fn challenge_brief_lines(
     challenge: Option<&learn_challenge::CompiledChallenge>,
     theme: Theme,
 ) -> Vec<Line<'static>> {
     let Some(challenge) = challenge else {
-        return vec![Line::from(Span::styled("No active quest", theme.dim()))];
+        return vec![Line::from(Span::styled("No lesson selected", theme.dim()))];
     };
     vec![
         Line::from(Span::styled(
@@ -2039,10 +2230,6 @@ fn challenge_brief_lines(
         Line::from(Span::styled(
             challenge.spec.objective.text.clone(),
             theme.fg,
-        )),
-        Line::from(Span::styled(
-            format!("skill  {}", challenge.spec.id),
-            theme.muted(),
         )),
     ]
 }
@@ -2060,7 +2247,7 @@ fn docs_sidebar_lines(
         Line::from(Span::styled("Search the command reference", theme.dim())),
         Line::from(""),
         Line::from(Span::styled(
-            format!("/ {query}▌"),
+            format!("⌕  {query}▌"),
             Style::default().fg(theme.warn),
         )),
         Line::from(""),
@@ -2110,18 +2297,13 @@ fn next_challenge_history_lines(
     theme: Theme,
 ) -> Vec<Line<'static>> {
     vec![
-        Line::from(""),
         Line::from(Span::styled(
-            format!("✦ NEXT CHALLENGE  /  {}", challenge.spec.meta.title),
+            format!("Next  ·  {}", challenge.spec.meta.title),
             theme.accent().add_modifier(Modifier::BOLD),
         )),
         Line::from(Span::styled(
             challenge.spec.objective.text.clone(),
             theme.fg,
-        )),
-        Line::from(Span::styled(
-            format!("skill  {}", challenge.spec.id),
-            theme.muted(),
         )),
         Line::from(""),
     ]
@@ -2129,38 +2311,46 @@ fn next_challenge_history_lines(
 
 fn completion_lines(
     challenge: Option<&learn_challenge::CompiledChallenge>,
-    next_title: Option<&str>,
     score: usize,
+    total: usize,
+    width: u16,
     theme: Theme,
 ) -> Vec<Line<'static>> {
-    let title = challenge.map_or("Quest complete", |item| item.spec.meta.title.as_str());
-    let next_line = next_title.map_or_else(
-        || "NEXT QUEST  /  skill path complete".to_owned(),
-        |title| format!("NEXT QUEST  /  {title}"),
-    );
+    let title = challenge.map_or("Lesson", |item| item.spec.meta.title.as_str());
+    let box_width = usize::from(width).min(48).max(4);
+    let content_width = box_width.saturating_sub(3);
+    let border = Style::default().fg(theme.success);
+    let card_line = |value: String, style: Style| {
+        let value = truncate_text(&value, content_width);
+        let padding = content_width.saturating_sub(value.chars().count());
+        Line::from(vec![
+            Span::styled("│ ", border),
+            Span::styled(format!("{value}{}", " ".repeat(padding)), style),
+            Span::styled("│", border),
+        ])
+    };
     vec![
         Line::from(""),
         Line::from(Span::styled(
-            "✓  QUEST CLEARED",
+            format!("╭{}╮", "─".repeat(box_width.saturating_sub(2))),
+            border,
+        )),
+        card_line(
+            "✓ Completed".to_owned(),
             Style::default()
                 .fg(theme.success)
                 .add_modifier(Modifier::BOLD),
-        )),
-        Line::from(Span::styled(
-            truncate_text(title, 32),
+        ),
+        card_line(
+            title.to_owned(),
             Style::default().fg(theme.fg).add_modifier(Modifier::BOLD),
+        ),
+        card_line(format!("{score} of {total} finished"), theme.dim()),
+        Line::from(Span::styled(
+            format!("╰{}╯", "─".repeat(box_width.saturating_sub(2))),
+            border,
         )),
         Line::from(""),
-        Line::from(Span::styled(
-            "VERIFIER STATUS  /  ALL OBJECTIVES MATCHED",
-            theme.accent(),
-        )),
-        Line::from(Span::styled(
-            format!("score: {score} quests mastered"),
-            theme.accent(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(next_line, theme.dim())),
     ]
 }
 
@@ -2202,62 +2392,58 @@ fn render_palette_overlay(
     frame.render_widget(palette, popup);
 }
 
-fn render_terminal_pet(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    pet: &PetState,
-    cat_animation: &CatAnimation,
-) {
+fn render_terminal_pet(frame: &mut ratatui::Frame<'_>, area: Rect, pet: &PetState, theme: Theme) {
     let inner = panel_content_area(area);
     if inner.width < PET_WIDTH || inner.height < PET_HEIGHT {
         return;
     }
-    let width = PET_WIDTH;
-    let height = PET_HEIGHT;
-    let max_x = inner.width.saturating_sub(width);
-    let max_y = inner.height.saturating_sub(height);
+    let max_x = inner.width.saturating_sub(PET_WIDTH);
     let x = u16::try_from(pet.x.max(0)).unwrap_or(0).min(max_x);
-    let pet_area = Rect::new(
-        inner.x.saturating_add(x),
-        inner.y.saturating_add(max_y),
-        width,
-        height,
-    );
-    cat_animation.render(
-        frame,
-        pet_area,
-        pet.animation_frame(cat_animation.frame_count()),
-        pet.facing_right,
-    );
-}
-
-fn render_inline_hint(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    hint: Option<&str>,
-    theme: Theme,
-) {
-    let Some(hint) = hint else {
-        return;
-    };
-    let content = panel_content_area(area);
-    let height = 3_u16.min(content.height);
-    let hint_area = Rect::new(
-        content.x,
-        content.bottom().saturating_sub(height),
-        content.width,
-        height,
-    );
-    let lines = vec![Line::from(vec![
-        Span::styled("hint  ", theme.accent().add_modifier(Modifier::BOLD)),
-        Span::styled(hint, theme.dim()),
-    ])];
-    frame.render_widget(
-        Paragraph::new(lines)
-            .style(Style::default().bg(theme.surface))
-            .wrap(Wrap { trim: true }),
-        hint_area,
-    );
+    let origin_x = inner.x.saturating_add(x);
+    let origin_y = inner.bottom().saturating_sub(PET_HEIGHT);
+    const MASCOT: [&str; 6] = [
+        "   ▄████▄    ",
+        " ▄████████▄  ",
+        "███  ◉  ◉ ███",
+        "███   ▾   ███",
+        " ▀████████▀  ",
+        "   ▀▀  ▀▀    ",
+    ];
+    let blink = pet.animation_frame(8) == 7;
+    let buffer = frame.buffer_mut();
+    for (row, sprite_row) in MASCOT.iter().enumerate() {
+        for (column, glyph) in sprite_row.chars().enumerate() {
+            if glyph == ' ' {
+                continue;
+            }
+            let x = origin_x.saturating_add(u16::try_from(column).unwrap_or(0));
+            let y = origin_y.saturating_add(u16::try_from(row).unwrap_or(0));
+            let Some(cell) = buffer.cell_mut((x, y)) else {
+                continue;
+            };
+            if cell.symbol() != " " {
+                continue;
+            }
+            let symbol = if blink && glyph == '◉' {
+                "─"
+            } else {
+                match glyph {
+                    '▄' => "▄",
+                    '▀' => "▀",
+                    '█' => "█",
+                    '◉' => "◉",
+                    '▾' => "▾",
+                    _ => continue,
+                }
+            };
+            cell.set_symbol(symbol)
+                .set_fg(if glyph == '◉' || glyph == '▾' {
+                    theme.fg
+                } else {
+                    theme.accent
+                });
+        }
+    }
 }
 
 fn render_content_rain(
@@ -2451,12 +2637,6 @@ pub enum TuiError {
     /// Local daemon state failure.
     #[error(transparent)]
     Daemon(#[from] learn_daemon::DaemonError),
-    /// Embedded image decoding failure.
-    #[error("embedded image decoding failed: {0}")]
-    Image(#[source] image::ImageError),
-    /// Unicode terminal image encoding failure.
-    #[error("terminal image encoding failed: {0}")]
-    ImageRenderer(#[source] ratatui_image::errors::Errors),
 }
 
 #[cfg(test)]
@@ -2494,6 +2674,25 @@ mod tests {
         let popup = centered_rect(72, 55, Rect::new(0, 0, 80, 24));
         assert_eq!(popup, Rect::new(11, 5, 57, 13));
         assert_eq!(centered_rect(72, 55, Rect::new(0, 0, 1, 1)).width, 0);
+    }
+
+    #[test]
+    fn terminal_snapshot_does_not_append_unused_screen_rows() {
+        let mut parser = vt100::Parser::new(20, 40, 64);
+        parser.process(b"finished\r\n");
+        let rows = terminal_lines_with_cursor(&parser, 40, false, ThemeId::Default.theme());
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn successful_output_waits_for_prompt_before_advancing() {
+        let mut pending = Some(Vec::new());
+        let mut hints = 0;
+        observe_command_output(b"result\r\n", &mut pending, &mut hints);
+        assert!(pending.is_some());
+        observe_command_output(b"\x07learner@learn", &mut pending, &mut hints);
+        assert!(pending.is_none());
+        assert_eq!(hints, 0);
     }
 
     #[test]
@@ -2554,6 +2753,24 @@ mod tests {
         assert_eq!(palette_matches("vmi"), vec![3]);
         assert!(app_leader(KeyCode::Char(' '), KeyModifiers::CONTROL));
         assert!(!app_leader(KeyCode::Char(' '), KeyModifiers::NONE));
+    }
+
+    #[test]
+    fn ctrl_t_cycles_through_every_theme_and_wraps() {
+        assert!(theme_cycle_key(KeyCode::Char('t'), KeyModifiers::CONTROL));
+        assert!(theme_cycle_key(KeyCode::Char('T'), KeyModifiers::CONTROL));
+        assert!(!theme_cycle_key(KeyCode::Char('t'), KeyModifiers::NONE));
+        assert!(!theme_cycle_key(KeyCode::Char('x'), KeyModifiers::CONTROL));
+        assert_eq!(ThemeId::ALL.len(), 21);
+        assert_eq!(ThemeId::Default.next(), ThemeId::Catppuccin);
+        let mut seen = vec![ThemeId::Default];
+        let mut current = ThemeId::Default.next();
+        while current != ThemeId::Default {
+            assert!(!seen.contains(&current), "cycle repeated a theme");
+            seen.push(current);
+            current = current.next();
+        }
+        assert_eq!(seen.len(), ThemeId::ALL.len());
     }
 
     #[test]
