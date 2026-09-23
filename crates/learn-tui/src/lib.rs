@@ -11,7 +11,10 @@ use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor,
-    event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    event::{
+        self, Event, KeyCode, KeyEventKind, KeyModifiers, KeyboardEnhancementFlags,
+        ModifierKeyCode, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -322,48 +325,73 @@ struct PetState {
 #[derive(Debug, Clone, Default)]
 struct KeyboardState {
     last: Option<(KeyCode, KeyModifiers, Duration)>,
-    recent: String,
+    recent: Vec<(String, Duration)>,
     typed_at: Vec<Duration>,
 }
 
 impl KeyboardState {
     fn record(&mut self, code: KeyCode, modifiers: KeyModifiers, now: Duration) {
         self.last = Some((code, modifiers, now));
-        match code {
+        let trail_key = match code {
             KeyCode::Char(character) if !modifiers.contains(KeyModifiers::CONTROL) => {
-                self.recent.push(character);
+                if self
+                    .typed_at
+                    .last()
+                    .is_some_and(|last| now.saturating_sub(*last) > Duration::from_secs(2))
+                {
+                    self.typed_at.clear();
+                }
                 self.typed_at.push(now);
-                self.typed_at
-                    .retain(|time| now.saturating_sub(*time) <= Duration::from_secs(30));
+                Some(if character == ' ' {
+                    "Space".to_owned()
+                } else {
+                    character.to_string()
+                })
             }
-            KeyCode::Backspace => {
-                self.recent.pop();
+            KeyCode::Backspace => Some("⌫".to_owned()),
+            KeyCode::Enter => Some("↵".to_owned()),
+            KeyCode::Tab => Some("Tab".to_owned()),
+            KeyCode::Modifier(ModifierKeyCode::LeftControl | ModifierKeyCode::RightControl) => {
+                Some("Ctrl".to_owned())
             }
-            KeyCode::Enter => self.recent.push('↵'),
-            KeyCode::Tab => self.recent.push('⇥'),
-            _ => {}
-        }
-        if self.recent.chars().count() > 28 {
-            self.recent = self.recent.chars().skip(1).collect();
-        }
-    }
-
-    fn wpm(&self, now: Duration) -> usize {
-        let Some(first) = self.typed_at.first() else {
-            return 0;
+            KeyCode::Modifier(ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift) => {
+                Some("Shift".to_owned())
+            }
+            KeyCode::Modifier(ModifierKeyCode::LeftAlt | ModifierKeyCode::RightAlt) => {
+                Some("Alt".to_owned())
+            }
+            _ => None,
         };
-        if self
-            .typed_at
-            .last()
-            .is_some_and(|last| now.saturating_sub(*last) > Duration::from_secs(4))
-        {
-            return 0;
+        if let Some(key) = trail_key {
+            self.recent.push((key, now));
+            if self.recent.len() > 4 {
+                self.recent.remove(0);
+            }
         }
-        let elapsed = now.saturating_sub(*first).as_secs_f64().max(3.0);
-        ((self.typed_at.len() as f64 / 5.0) * 60.0 / elapsed).round() as usize
     }
 
-    fn active(&self, label: &str, now: Duration) -> bool {
+    fn wpm(&self, now: Duration) -> Option<usize> {
+        let first = *self.typed_at.first()?;
+        let last = *self.typed_at.last()?;
+        let elapsed = last.saturating_sub(first).as_secs_f64();
+        if now.saturating_sub(last) > Duration::from_secs(2)
+            || self.typed_at.len() < 5
+            || elapsed < 1.0
+        {
+            return None;
+        }
+        Some(((self.typed_at.len() as f64 / 5.0) * 60.0 / elapsed).round() as usize)
+    }
+
+    fn recent_keys(&self, now: Duration) -> Vec<&str> {
+        self.recent
+            .iter()
+            .filter(|(_, at)| now.saturating_sub(*at) < Duration::from_secs(1))
+            .map(|(key, _)| key.as_str())
+            .collect()
+    }
+
+    fn active(&self, label: &str, position: usize, now: Duration) -> bool {
         let Some((code, modifiers, pressed_at)) = self.last else {
             return false;
         };
@@ -374,19 +402,31 @@ impl KeyboardState {
             "Esc" => code == KeyCode::Esc,
             "Back" => code == KeyCode::Backspace,
             "Tab" => code == KeyCode::Tab,
-            "Ctrl" => modifiers.contains(KeyModifiers::CONTROL),
-            "Alt" => modifiers.contains(KeyModifiers::ALT),
-            "Shift" => {
-                modifiers.contains(KeyModifiers::SHIFT)
-                    || matches!(code, KeyCode::Char(character) if character.is_ascii_uppercase())
-            }
+            "Ctrl" => match code {
+                KeyCode::Modifier(ModifierKeyCode::RightControl) => position == 7,
+                KeyCode::Modifier(ModifierKeyCode::LeftControl) => position == 0,
+                _ => position == 0 && modifiers.contains(KeyModifiers::CONTROL),
+            },
+            "Alt" => match code {
+                KeyCode::Modifier(ModifierKeyCode::RightAlt) => position == 4,
+                KeyCode::Modifier(ModifierKeyCode::LeftAlt) => position == 2,
+                _ => position == 2 && modifiers.contains(KeyModifiers::ALT),
+            },
+            "Shift" => match code {
+                KeyCode::Modifier(ModifierKeyCode::RightShift) => position == 11,
+                KeyCode::Modifier(ModifierKeyCode::LeftShift) => position == 0,
+                _ => {
+                    position == 0
+                        && (modifiers.contains(KeyModifiers::SHIFT)
+                            || matches!(code, KeyCode::Char(character) if character.is_ascii_uppercase()))
+                }
+            },
             "Space" => code == KeyCode::Char(' '),
             "Enter" => code == KeyCode::Enter,
             "←" => code == KeyCode::Left,
             "→" => code == KeyCode::Right,
-            _ => {
-                matches!(code, KeyCode::Char(character) if label.eq_ignore_ascii_case(&character.to_string()))
-            }
+            _ => matches!(code, KeyCode::Char(character)
+                if label.eq_ignore_ascii_case(&character.to_string())),
         }
     }
 }
@@ -423,28 +463,31 @@ fn render_keyboard(
             .border_style(theme.muted()),
         area,
     );
-    let input_width = usize::from(area.width.saturating_sub(16));
-    let input = keyboard
-        .recent
-        .chars()
-        .rev()
-        .take(input_width.saturating_sub(2))
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect::<String>();
+    let recent = keyboard.recent_keys(now);
+    if !recent.is_empty() {
+        let mut chips = Vec::new();
+        for key in recent {
+            chips.push(Span::styled(
+                format!(" {key} "),
+                Style::default().fg(theme.fg).bg(theme.overlay),
+            ));
+            chips.push(Span::raw(" "));
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(chips)),
+            Rect::new(
+                area.x.saturating_add(2),
+                area.y.saturating_add(1),
+                area.width.saturating_sub(16),
+                1,
+            ),
+        );
+    }
+    let speed = keyboard
+        .wpm(now)
+        .map_or_else(|| "— WPM".to_owned(), |value| format!("{value} WPM"));
     frame.render_widget(
-        Paragraph::new(format!("› {input}"))
-            .style(Style::default().fg(theme.accent).bg(theme.overlay)),
-        Rect::new(
-            area.x.saturating_add(2),
-            area.y.saturating_add(1),
-            area.width.saturating_sub(16),
-            1,
-        ),
-    );
-    frame.render_widget(
-        Paragraph::new(format!("{:>3} WPM", keyboard.wpm(now)))
+        Paragraph::new(speed)
             .alignment(Alignment::Right)
             .style(Style::default().fg(theme.warn)),
         Rect::new(
@@ -477,7 +520,7 @@ fn render_keyboard(
             .y
             .saturating_add(3 + u16::try_from(row).unwrap_or(0) * 2);
         let mut x = base_x.saturating_add(u16::try_from(row.min(3)).unwrap_or(0));
-        for label in *keys {
+        for (position, label) in keys.iter().enumerate() {
             let width = match *label {
                 "Esc" | "Back" | "Tab" | "Ctrl" | "Menu" => 4,
                 "Caps" | "Enter" | "Shift" => 5,
@@ -488,7 +531,7 @@ fn render_keyboard(
             if x.saturating_add(width) >= area.right().saturating_sub(1) {
                 break;
             }
-            let active = keyboard.active(label, now);
+            let active = keyboard.active(label, position, now);
             let face = if active {
                 Style::default()
                     .fg(theme.selected_fg)
@@ -614,10 +657,23 @@ fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>, TuiError> {
     enable_raw_mode().map_err(TuiError::Io)?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, cursor::Hide).map_err(TuiError::Io)?;
+    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES,
+            ),
+        );
+    }
     Terminal::new(CrosstermBackend::new(stdout)).map_err(TuiError::Io)
 }
 
 fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> Result<(), TuiError> {
+    if crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        let _ = execute!(terminal.backend_mut(), PopKeyboardEnhancementFlags);
+    }
     disable_raw_mode().map_err(TuiError::Io)?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show).map_err(TuiError::Io)?;
     terminal.show_cursor().map_err(TuiError::Io)
@@ -999,7 +1055,20 @@ async fn app_loop(
                     }
                     if mode == AppMode::Lesson && focus == PanelFocus::Right {
                         match key.code {
-                            KeyCode::Esc => focus = PanelFocus::Left,
+                            KeyCode::Esc => {
+                                if docs_query.is_empty() {
+                                    focus = PanelFocus::Left;
+                                } else {
+                                    docs_query.clear();
+                                    refresh_docs(
+                                        daemon,
+                                        client.as_mut(),
+                                        &docs_query,
+                                        &mut docs_results,
+                                    )
+                                    .await?;
+                                }
+                            }
                             KeyCode::Backspace => {
                                 docs_query.pop();
                                 refresh_docs(
@@ -1126,6 +1195,12 @@ async fn app_loop(
                         _ if session.is_some() || rpc_session_id.is_some() => {
                             let submitted_command =
                                 track_shell_input(&mut shell_input, key.code, key.modifiers);
+                            if submitted_command
+                                .as_ref()
+                                .is_some_and(|command| command.trim() == "clear")
+                            {
+                                terminal_history.clear();
+                            }
                             if submitted_command
                                 .as_ref()
                                 .is_some_and(|command| !command.trim().is_empty())
