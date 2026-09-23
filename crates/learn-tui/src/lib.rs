@@ -330,6 +330,7 @@ struct PetState {
     x: i16,
     dx: i16,
     step_elapsed: Duration,
+    age: Duration,
     mood: u8,
     facing_right: bool,
 }
@@ -575,7 +576,8 @@ fn render_keyboard(
 
 const PET_WIDTH: u16 = 14;
 const PET_HEIGHT: u16 = 6;
-const PET_STEP: Duration = Duration::from_millis(850);
+const PET_STEP: Duration = Duration::from_millis(280);
+const PET_WAKE: Duration = Duration::from_millis(2300);
 
 impl Default for PetState {
     fn default() -> Self {
@@ -583,6 +585,7 @@ impl Default for PetState {
             x: 8,
             dx: 1,
             step_elapsed: Duration::ZERO,
+            age: Duration::ZERO,
             mood: 0,
             facing_right: true,
         }
@@ -591,11 +594,15 @@ impl Default for PetState {
 
 impl PetState {
     fn tick(&mut self, elapsed: Duration, width: u16) {
+        self.age += elapsed;
+        if self.age < PET_WAKE {
+            return;
+        }
         self.step_elapsed += elapsed;
         if self.step_elapsed < PET_STEP {
             return;
         }
-        self.step_elapsed = Duration::ZERO;
+        self.step_elapsed -= PET_STEP;
         self.mood = self.mood.wrapping_add(1);
         let max_x = i16::try_from(width.saturating_sub(PET_WIDTH)).unwrap_or(i16::MAX);
         self.x = self.x.clamp(0, max_x.max(0));
@@ -623,17 +630,6 @@ impl PetState {
         self.dx = dx;
         self.facing_right = dx > 0;
         true
-    }
-
-    fn animation_frame(&self, frame_count: usize) -> usize {
-        if frame_count == 0 {
-            return 0;
-        }
-        let count = u128::try_from(frame_count).unwrap_or(1);
-        let index = self.step_elapsed.as_millis().saturating_mul(count) / PET_STEP.as_millis();
-        usize::try_from(index)
-            .unwrap_or(0)
-            .min(frame_count.saturating_sub(1))
     }
 }
 
@@ -770,6 +766,7 @@ async fn app_loop(
     let mut course_complete = false;
     let mut animations_enabled = true;
     let mut mode = AppMode::Start;
+    let mut palette_return_mode = AppMode::Lesson;
     let mut start_transition = None;
     let mut focus = PanelFocus::Left;
     // The pet is an optional atmosphere feature; keep the default lesson
@@ -798,6 +795,9 @@ async fn app_loop(
                 mode = AppMode::Lesson;
                 focus = PanelFocus::Left;
             }
+        }
+        if mode == AppMode::Typer {
+            typer_dojo.tick(animation_time);
         }
         if mode == AppMode::Vim {
             vim_dojo.resize_snake(
@@ -939,9 +939,16 @@ async fn app_loop(
                     }
                     if app_leader(key.code, key.modifiers) {
                         if mode == AppMode::Palette {
-                            mode = AppMode::Lesson;
+                            mode = palette_return_mode;
+                            if mode == AppMode::Typer {
+                                typer_dojo.resume(animation_time);
+                            }
                             palette_query.clear();
                         } else {
+                            palette_return_mode = mode;
+                            if mode == AppMode::Typer {
+                                typer_dojo.pause(animation_time);
+                            }
                             mode = AppMode::Palette;
                             palette_index = 0;
                             palette_query.clear();
@@ -988,7 +995,10 @@ async fn app_loop(
                         let matches = palette_matches(&palette_query);
                         match key.code {
                             KeyCode::Esc => {
-                                mode = AppMode::Lesson;
+                                mode = palette_return_mode;
+                                if mode == AppMode::Typer {
+                                    typer_dojo.resume(animation_time);
+                                }
                                 palette_query.clear();
                             }
                             KeyCode::Up => palette_index = palette_index.saturating_sub(1),
@@ -1072,6 +1082,9 @@ async fn app_loop(
                                         }
                                         PaletteCommand::TogglePet => {
                                             pet_enabled = !pet_enabled;
+                                            if pet_enabled {
+                                                pet = PetState::default();
+                                            }
                                             mode = AppMode::Lesson;
                                         }
                                         PaletteCommand::ToggleRain => {
@@ -1084,7 +1097,10 @@ async fn app_loop(
                                         }
                                         PaletteCommand::SetTheme(selected_theme) => {
                                             theme_id = selected_theme;
-                                            mode = AppMode::Lesson;
+                                            mode = palette_return_mode;
+                                            if mode == AppMode::Typer {
+                                                typer_dojo.resume(animation_time);
+                                            }
                                         }
                                         PaletteCommand::Quit => break,
                                     }
@@ -2082,7 +2098,6 @@ fn render_start_screen(
         Block::default().style(Style::default().bg(theme.backdrop)),
         area,
     );
-    render_game_of_life(frame, area, time, theme);
     if area.width < 84 || area.height < 19 {
         let lines = vec![
             Line::from(Span::styled("LEARN LINUX", theme.title())),
@@ -2103,8 +2118,8 @@ fn render_start_screen(
         return;
     }
 
-    let card_width = area.width.saturating_sub(6).min(92);
-    let card_height = area.height.saturating_sub(4).min(21);
+    let card_width = area.width.saturating_sub(8).min(112);
+    let card_height = area.height.saturating_sub(6).min(25);
     let card = Rect::new(
         area.x
             .saturating_add(area.width.saturating_sub(card_width) / 2),
@@ -2120,16 +2135,27 @@ fn render_start_screen(
             .style(Style::default().bg(theme.surface)),
         card,
     );
-    let art_x = card.x.saturating_add(3);
-    let art_y = card.y.saturating_add(card.height.saturating_sub(13) / 2);
+    let art_x = card.x.saturating_add(4);
+    let art_y = card.y.saturating_add(card.height.saturating_sub(16) / 2);
+    render_game_of_life(
+        frame,
+        Rect::new(
+            card.x.saturating_add(2),
+            card.y.saturating_add(1),
+            38,
+            card.height.saturating_sub(2),
+        ),
+        time,
+        theme,
+    );
     render_penguin_cells(frame, art_x, art_y, theme);
 
-    let text_x = card.x.saturating_add(40);
+    let text_x = card.x.saturating_add(44);
     let text_width = card.right().saturating_sub(text_x).saturating_sub(2);
     let text_y = card.y.saturating_add(3);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            "SHELL DOJO  /  OFFLINE",
+            "LEARN",
             theme.accent().add_modifier(Modifier::BOLD),
         ))),
         Rect::new(text_x, text_y, text_width, 1),
@@ -2137,7 +2163,7 @@ fn render_start_screen(
     let mut title = start_word_lines("LINUX", theme.accent().add_modifier(Modifier::BOLD));
     title.push(Line::from(""));
     title.push(Line::from(Span::styled(
-        "Learn the terminal by using it.",
+        "A real shell. Small challenges.",
         theme.fg,
     )));
     frame.render_widget(
@@ -2148,7 +2174,7 @@ fn render_start_screen(
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Enter ", theme.selected().add_modifier(Modifier::BOLD)),
-            Span::styled("  Start learning  →", theme.accent()),
+            Span::styled("  Open the shell  →", theme.accent()),
         ]))
         .block(
             Block::default()
@@ -2161,37 +2187,43 @@ fn render_start_screen(
     );
     frame.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{challenge_count} hands-on lessons"), theme.dim()),
+            Span::styled(format!("{challenge_count} lessons"), theme.dim()),
             Span::styled("   ·   ", theme.muted()),
-            Span::styled("Ctrl-Space  menu", theme.dim()),
+            Span::styled("Vim + Typer inside", theme.dim()),
         ])),
         Rect::new(text_x, card.bottom().saturating_sub(3), text_width, 1),
     );
 }
 
 fn render_penguin_cells(frame: &mut ratatui::Frame<'_>, x: u16, y: u16, theme: Theme) {
-    // Each pixel is a pair of background-colored cells: detailed art, no copyable glyphs.
-    const PIXELS: [&str; 13] = [
-        "00000011111000000",
-        "00001111111110000",
-        "00011111111111000",
-        "00111111111111100",
-        "01111111111111110",
-        "01111211121111110",
-        "11112222222221111",
-        "11122222322222111",
-        "11122222222222111",
-        "01112222222221110",
-        "00111222222211100",
-        "00001114411110000",
-        "00000444044400000",
+    // Colored cell backgrounds make Tux readable without adding copied art glyphs.
+    const PIXELS: [&str; 16] = [
+        "00000077777000000",
+        "00007711111770000",
+        "00071111111117000",
+        "00711133133111700",
+        "07111334343111170",
+        "07111115511111170",
+        "07111155511111170",
+        "71111222222111117",
+        "71112222222211117",
+        "71112222222211117",
+        "71112222222211117",
+        "07111222222111170",
+        "00711122211111700",
+        "00077111111770000",
+        "00055500000555000",
+        "00555500000555500",
     ];
     let colors = [
         theme.surface,
         theme.overlay,
         theme.fg,
+        theme.fg,
+        theme.surface,
         theme.warn,
-        theme.warn,
+        theme.muted,
+        theme.muted,
     ];
     for (row, pixels) in PIXELS.iter().enumerate() {
         for (column, pixel) in pixels.bytes().enumerate() {
@@ -2211,64 +2243,65 @@ fn render_penguin_cells(frame: &mut ratatui::Frame<'_>, x: u16, y: u16, theme: T
     }
 }
 
+fn life_next(cells: &[bool], width: usize, height: usize) -> Vec<bool> {
+    let mut next = vec![false; cells.len()];
+    for y in 0..height {
+        for x in 0..width {
+            let mut neighbors = 0_u8;
+            for dy in [height - 1, 0, 1] {
+                for dx in [width - 1, 0, 1] {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = (x + dx) % width;
+                    let ny = (y + dy) % height;
+                    neighbors += u8::from(cells[ny * width + nx]);
+                }
+            }
+            next[y * width + x] = neighbors == 3 || (cells[y * width + x] && neighbors == 2);
+        }
+    }
+    next
+}
+
 fn render_game_of_life(frame: &mut ratatui::Frame<'_>, area: Rect, time: Duration, theme: Theme) {
     let width = usize::from(area.width / 2);
     let height = usize::from(area.height);
-    if width < 4 || height < 4 {
+    if width < 5 || height < 5 {
         return;
     }
     let mut cells = vec![false; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let seed = x.wrapping_mul(31).wrapping_add(y.wrapping_mul(17));
-            cells[y * width + x] = seed % 29 == 0 || (x + y * 3) % 97 == 0;
-        }
-    }
-    let generations = usize::try_from((time.as_millis() / 420) % 24).unwrap_or(0);
-    for _ in 0..generations {
-        let mut next = vec![false; cells.len()];
-        for y in 0..height {
-            for x in 0..width {
-                let mut neighbors = 0_u8;
-                for dy in -1_i32..=1 {
-                    for dx in -1_i32..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-                        let nx = i32::try_from(x).unwrap_or(0) + dx;
-                        let ny = i32::try_from(y).unwrap_or(0) + dy;
-                        if nx >= 0
-                            && ny >= 0
-                            && usize::try_from(nx).is_ok_and(|value| value < width)
-                            && usize::try_from(ny).is_ok_and(|value| value < height)
-                            && cells[usize::try_from(ny).unwrap_or(0) * width
-                                + usize::try_from(nx).unwrap_or(0)]
-                        {
-                            neighbors += 1;
-                        }
-                    }
-                }
-                let alive = cells[y * width + x];
-                next[y * width + x] = neighbors == 3 || (alive && neighbors == 2);
+    for origin_y in (0..height).step_by(13) {
+        for origin_x in (0..width).step_by(19) {
+            for (dx, dy) in [(1, 0), (2, 1), (0, 2), (1, 2), (2, 2)] {
+                cells[((origin_y + dy) % height) * width + (origin_x + dx) % width] = true;
+            }
+            for dy in 4..=6 {
+                cells[((origin_y + dy) % height) * width + (origin_x + 10) % width] = true;
+            }
+            for (dx, dy) in [(7, 9), (8, 9), (7, 10), (8, 10)] {
+                cells[((origin_y + dy) % height) * width + (origin_x + dx) % width] = true;
             }
         }
-        cells = next;
     }
-    let buffer = frame.buffer_mut();
+    let generations = usize::try_from((time.as_millis() / 230) % 60).unwrap_or(0);
+    for _ in 0..generations {
+        cells = life_next(&cells, width, height);
+    }
     for y in 0..height {
         for x in 0..width {
             if !cells[y * width + x] {
                 continue;
             }
-            let screen_x = area.x.saturating_add(u16::try_from(x * 2).unwrap_or(0));
-            let screen_y = area.y.saturating_add(u16::try_from(y).unwrap_or(0));
-            if let Some(cell) = buffer.cell_mut((screen_x, screen_y)) {
-                cell.set_symbol(if (x + y) % 5 == 0 { "•" } else { "·" })
-                    .set_style(Style::default().fg(if (x + y) % 5 == 0 {
-                        theme.muted
-                    } else {
-                        theme.backdrop
-                    }));
+            let color = theme.overlay;
+            for half in 0..2 {
+                if let Some(cell) = frame.buffer_mut().cell_mut((
+                    area.x
+                        .saturating_add(u16::try_from(x * 2 + half).unwrap_or(0)),
+                    area.y.saturating_add(u16::try_from(y).unwrap_or(0)),
+                )) {
+                    cell.set_symbol(" ").set_bg(color);
+                }
             }
         }
     }
@@ -3099,7 +3132,7 @@ fn render_palette_overlay(
 
 fn render_terminal_pet(frame: &mut ratatui::Frame<'_>, area: Rect, pet: &PetState, theme: Theme) {
     let inner = panel_content_area(area);
-    if inner.width < PET_WIDTH || inner.height < PET_HEIGHT {
+    if inner.width < PET_WIDTH || inner.height < PET_HEIGHT || pet.age < PET_WAKE {
         return;
     }
     let max_x = inner.width.saturating_sub(PET_WIDTH);
@@ -3114,9 +3147,15 @@ fn render_terminal_pet(frame: &mut ratatui::Frame<'_>, area: Rect, pet: &PetStat
         " ▀████████▀  ",
         "   ▀▀  ▀▀    ",
     ];
-    let blink = pet.animation_frame(8) == 7;
+    let blink = pet.age.as_millis() % 4300 < 90;
+    let feet = match pet.mood % 3 {
+        0 => "   ▀▀  ▀▀    ",
+        1 => "   ▀▀   ▀    ",
+        _ => "    ▀   ▀▀   ",
+    };
     let buffer = frame.buffer_mut();
     for (row, sprite_row) in MASCOT.iter().enumerate() {
+        let sprite_row = if row == 5 { feet } else { sprite_row };
         for (column, glyph) in sprite_row.chars().enumerate() {
             if glyph == ' ' {
                 continue;
@@ -3147,6 +3186,17 @@ fn render_terminal_pet(frame: &mut ratatui::Frame<'_>, area: Rect, pet: &PetStat
                 } else {
                     theme.accent
                 });
+        }
+    }
+    let tail_x = if pet.facing_right {
+        origin_x.saturating_add(13)
+    } else {
+        origin_x
+    };
+    if let Some(cell) = buffer.cell_mut((tail_x, origin_y.saturating_add(4))) {
+        if cell.symbol() == " " {
+            cell.set_symbol(if pet.facing_right { "▖" } else { "▗" })
+                .set_fg(theme.accent);
         }
     }
 }
@@ -3347,6 +3397,31 @@ pub enum TuiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_of_life_blinker_keeps_evolving() {
+        let mut cells = vec![false; 25];
+        for y in 1..=3 {
+            cells[y * 5 + 2] = true;
+        }
+        let next = life_next(&cells, 5, 5);
+        assert!(next[2 * 5 + 1] && next[2 * 5 + 2] && next[2 * 5 + 3]);
+        assert_eq!(life_next(&next, 5, 5), cells);
+    }
+
+    #[test]
+    fn pet_wakes_then_walks_with_its_facing_direction() {
+        let mut pet = PetState::default();
+        pet.tick(Duration::from_millis(2_000), 100);
+        assert_eq!(pet.x, 8);
+        pet.tick(Duration::from_millis(300), 100);
+        assert_eq!(pet.x, 9);
+        assert!(pet.facing_right);
+        assert!(pet.handle_key(KeyCode::Left));
+        pet.tick(PET_STEP, 100);
+        assert_eq!(pet.x, 8);
+        assert!(!pet.facing_right);
+    }
 
     #[test]
     fn pane_size_matches_split_terminal_content() {
