@@ -13,6 +13,7 @@ pub use wasm::{
 use std::collections::BTreeSet;
 use std::fmt::{self, Write as FmtWrite};
 use std::fs;
+use std::io;
 use std::io::{Read, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -891,9 +892,19 @@ fn verify_expression(
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let permissions = fs::metadata(host_path(home, path)?)
-                        .map_err(RuntimeError::Io)?
-                        .permissions();
+                    let metadata = match fs::metadata(host_path(home, path)?) {
+                        Ok(metadata) => metadata,
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                            ) =>
+                        {
+                            return Ok(false);
+                        }
+                        Err(error) => return Err(RuntimeError::Io(error)),
+                    };
+                    let permissions = metadata.permissions();
                     Ok(permissions.mode() & 0o777 == *mode)
                 }
                 #[cfg(not(unix))]
@@ -907,24 +918,53 @@ fn verify_expression(
             VerifierPredicate::PathExists(path) => Ok(host_path(home, path)?.exists()),
             VerifierPredicate::PathMissing(path) => Ok(!host_path(home, path)?.exists()),
             VerifierPredicate::FileContains { path, needle } => {
-                let contents = fs::read(host_path(home, path)?).map_err(RuntimeError::Io)?;
+                let Some(contents) = read_verifier_file(home, path)? else {
+                    return Ok(false);
+                };
                 Ok(String::from_utf8_lossy(&contents).contains(needle))
             }
             VerifierPredicate::FileRead { path, expected } => {
                 if !read_files.contains(path) {
                     return Ok(false);
                 }
-                let contents = fs::read(host_path(home, path)?).map_err(RuntimeError::Io)?;
+                let Some(contents) = read_verifier_file(home, path)? else {
+                    return Ok(false);
+                };
                 Ok(String::from_utf8_lossy(&contents).contains(expected))
             }
             VerifierPredicate::FileEquals { path, expected } => {
-                let contents = fs::read(host_path(home, path)?).map_err(RuntimeError::Io)?;
+                let Some(contents) = read_verifier_file(home, path)? else {
+                    return Ok(false);
+                };
                 Ok(contents == *expected)
+            }
+            VerifierPredicate::FileTextEquals { path, expected } => {
+                let Some(contents) = read_verifier_file(home, path)? else {
+                    return Ok(false);
+                };
+                Ok(learn_core::text_contents_equal(&contents, expected))
             }
             VerifierPredicate::WorkingDirectory(expected) => {
                 Ok(working_directory == Some(expected))
             }
         },
+    }
+}
+
+fn read_verifier_file(home: &Path, path: &SandboxPath) -> Result<Option<Vec<u8>>, RuntimeError> {
+    match fs::read(host_path(home, path)?) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound
+                    | io::ErrorKind::PermissionDenied
+                    | io::ErrorKind::IsADirectory
+            ) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(RuntimeError::Io(error)),
     }
 }
 
@@ -1169,6 +1209,25 @@ mod tests {
         assert!(
             verify_expression(&home, None, &BTreeSet::new(), &expression)
                 .expect("verification succeeds")
+        );
+        let absent = SandboxPath::parse("~/later.txt").expect("valid sandbox path");
+        let unfinished = VerifierExpr::All(vec![
+            VerifierExpr::Predicate(VerifierPredicate::FileEquals {
+                path: absent.clone(),
+                expected: b"ready\n".to_vec(),
+            }),
+            VerifierExpr::Predicate(VerifierPredicate::FileTextEquals {
+                path: absent.clone(),
+                expected: b"ready".to_vec(),
+            }),
+            VerifierExpr::Predicate(VerifierPredicate::FileContains {
+                path: absent,
+                needle: "ready".to_owned(),
+            }),
+        ]);
+        assert!(
+            !verify_expression(&home, None, &BTreeSet::new(), &unfinished)
+                .expect("an incomplete lesson is a normal unsolved state")
         );
         assert!(!home.join("notes/message.txt").is_symlink());
         fs::remove_dir_all(home).expect("remove test home");

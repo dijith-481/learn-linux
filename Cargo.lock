@@ -827,6 +827,7 @@ dependencies = [
  "learn-docs",
  "portable-pty",
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tracing",
 ]
@@ -838,6 +839,7 @@ dependencies = [
  "crossterm",
  "frizbee",
  "learn-challenge",
+ "learn-core",
  "learn-daemon",
  "learn-protocol",
  "learn-runtime",

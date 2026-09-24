@@ -9,6 +9,7 @@ rust-version.workspace = true
 crossterm.workspace = true
 frizbee.workspace = true
 learn-challenge = { path = "../learn-challenge" }
+learn-core = { path = "../learn-core" }
 learn-daemon = { path = "../learn-daemon" }
 learn-protocol = { path = "../learn-protocol" }
 learn-runtime = { path = "../learn-runtime" }

@@ -453,6 +453,10 @@ fn parse_verifier_node(node: &KdlNode) -> Result<VerifierExpr, CompileError> {
             path: SandboxPath::parse(string_argument(node, 0, "path")?)?,
             expected: string_argument(node, 1, "expected text")?.into_bytes(),
         })),
+        "file-text-equals" => Ok(VerifierExpr::Predicate(VerifierPredicate::FileTextEquals {
+            path: SandboxPath::parse(string_argument(node, 0, "path")?)?,
+            expected: string_argument(node, 1, "expected text")?.into_bytes(),
+        })),
         "cwd" => Ok(VerifierExpr::Predicate(
             VerifierPredicate::WorkingDirectory(SandboxPath::parse(string_argument(
                 node, 0, "path",

@@ -36,10 +36,27 @@ use tokio::sync::{Mutex as AsyncMutex, mpsc};
 pub struct ProgressState {
     /// Per-challenge progress.
     pub challenges: Vec<ChallengeProgress>,
+    /// Last lesson and shell commands, used to resume on the next launch.
+    #[serde(default)]
+    pub resume: PlayerResumeState,
+}
+
+/// Saved player session information.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct PlayerResumeState {
+    /// Challenge to reopen on launch, when it is still unfinished.
+    pub active_challenge_id: Option<String>,
+    /// Recent shell commands in oldest-to-newest order.
+    pub command_history: Vec<String>,
+    /// Encoded virtual filesystem and working directory for the active lesson.
+    pub shell_snapshot: Option<Vec<u8>>,
 }
 
 const PROGRESS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("progress");
 
+const MAX_PERSISTED_COMMANDS: usize = 500;
+const MAX_PERSISTED_SNAPSHOT_BYTES: usize = 1_048_576;
 /// Durable progress store.
 #[derive(Debug)]
 pub struct ProgressStore {
@@ -125,12 +142,55 @@ impl ProgressStore {
         self.state
             .challenges
             .retain(|progress| &progress.challenge_id != id);
+        if self.state.resume.active_challenge_id.as_deref() == Some(id.as_str()) {
+            self.state.resume.shell_snapshot = None;
+        }
         self.save()
     }
 
     /// Borrow all progress.
     pub fn all(&self) -> &[ChallengeProgress] {
         &self.state.challenges
+    }
+
+    /// Borrow the saved player session.
+    pub fn resume_state(&self) -> &PlayerResumeState {
+        &self.state.resume
+    }
+
+    /// Save the active lesson and recent shell commands.
+    pub fn save_resume_state(
+        &mut self,
+        challenge_id: &ChallengeId,
+        command_history: &[Vec<u8>],
+        shell_snapshot: Option<Vec<u8>>,
+    ) -> Result<(), DaemonError> {
+        self.state.resume.active_challenge_id = Some(challenge_id.to_string());
+        let first_saved_command = command_history.len().saturating_sub(MAX_PERSISTED_COMMANDS);
+        self.state.resume.command_history = command_history[first_saved_command..]
+            .iter()
+            .map(|command| String::from_utf8_lossy(command).into_owned())
+            .collect();
+        self.state.resume.shell_snapshot =
+            shell_snapshot.filter(|snapshot| snapshot.len() <= MAX_PERSISTED_SNAPSHOT_BYTES);
+        if let Some(progress) = self
+            .state
+            .challenges
+            .iter_mut()
+            .find(|progress| &progress.challenge_id == challenge_id)
+        {
+            if progress.status != CompletionStatus::Completed {
+                progress.status = CompletionStatus::InProgress;
+            }
+        } else {
+            self.state.challenges.push(ChallengeProgress {
+                challenge_id: challenge_id.clone(),
+                status: CompletionStatus::InProgress,
+                attempts: 1,
+                hints_used: Vec::new(),
+            });
+        }
+        self.save()
     }
 
     fn save(&self) -> Result<(), DaemonError> {
@@ -215,6 +275,33 @@ impl Daemon {
                 .filter(|item| current_challenges.contains(&item.challenge_id))
                 .cloned()
                 .collect()
+        })
+    }
+
+    /// Return saved lesson position and shell history.
+    pub fn resume_state(&self) -> Result<PlayerResumeState, DaemonError> {
+        self.with_progress(|progress| {
+            let mut state = progress.resume_state().clone();
+            if state
+                .active_challenge_id
+                .as_deref()
+                .is_some_and(|id| self.challenge(id).is_none())
+            {
+                state.active_challenge_id = None;
+            }
+            state
+        })
+    }
+
+    /// Persist the active lesson and recent shell history.
+    pub fn save_resume_state(
+        &self,
+        id: &ChallengeId,
+        command_history: &[Vec<u8>],
+        shell_snapshot: Option<Vec<u8>>,
+    ) -> Result<(), DaemonError> {
+        self.with_progress_mut(|progress| {
+            progress.save_resume_state(id, command_history, shell_snapshot)
         })
     }
 
@@ -557,6 +644,25 @@ impl Daemon {
             rows,
         )
         .map_err(|error| error.to_string())?;
+        let resume = self.resume_state().map_err(|error| error.to_string())?;
+        if resume.active_challenge_id.as_deref() == Some(challenge.spec.id.as_str())
+            && let Some(snapshot) = resume.shell_snapshot.as_deref()
+        {
+            session
+                .restore_snapshot(challenge.spec.id.as_str(), snapshot)
+                .map_err(|error| error.to_string())?;
+        }
+        session
+            .set_command_history(
+                resume
+                    .command_history
+                    .iter()
+                    .map(|command| command.as_bytes().to_vec())
+                    .collect(),
+            )
+            .map_err(|error| error.to_string())?;
+        let command_history = session.command_history();
+        let shell_snapshot = session.snapshot().map_err(|error| error.to_string())?;
         let session_id = session.id.clone();
         let mut reader = session
             .take_reader()
@@ -567,6 +673,8 @@ impl Daemon {
             session: Arc::new(std::sync::Mutex::new(session)),
         };
         self.start_challenge(challenge.spec.id.clone())
+            .map_err(|error| error.to_string())?;
+        self.save_resume_state(&challenge.spec.id, &command_history, Some(shell_snapshot))
             .map_err(|error| error.to_string())?;
         self.sessions
             .lock()
@@ -630,6 +738,13 @@ impl Daemon {
         session
             .write(&input.data)
             .map_err(|error| error.to_string())?;
+        if input.data.iter().any(|byte| matches!(byte, b'\r' | b'\n')) {
+            let challenge_id = ChallengeId::new(managed.challenge_id.clone())
+                .map_err(|error| error.to_string())?;
+            let snapshot = session.snapshot().map_err(|error| error.to_string())?;
+            self.save_resume_state(&challenge_id, &session.command_history(), Some(snapshot))
+                .map_err(|error| error.to_string())?;
+        }
         if session
             .verify(&managed.verifier)
             .map_err(|error| error.to_string())?
@@ -1180,16 +1295,128 @@ mod tests {
             store.start(first.clone()).expect("start");
             store.complete(&first).expect("complete");
             store.start(second.clone()).expect("start");
+            store
+                .save_resume_state(
+                    &second,
+                    &[b"mkdir project".to_vec(), b"cd project".to_vec()],
+                    Some(vec![1, 2, 3]),
+                )
+                .expect("save resume state");
         }
         {
             let mut store = ProgressStore::open(&path).expect("reopen");
             assert_eq!(store.all().len(), 2);
             assert_eq!(store.all()[0].status, CompletionStatus::Completed);
+            assert_eq!(
+                store.resume_state().active_challenge_id.as_deref(),
+                Some("second")
+            );
+            assert_eq!(
+                store.resume_state().command_history,
+                vec!["mkdir project", "cd project"]
+            );
+            assert_eq!(
+                store.resume_state().shell_snapshot.as_deref(),
+                Some(&[1, 2, 3][..])
+            );
             store.reset(&first).expect("reset");
             assert_eq!(store.all().len(), 1);
             assert_eq!(store.all()[0].challenge_id, second);
         }
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn unfinished_lesson_workspace_survives_a_daemon_restart() {
+        let path = std::env::temp_dir().join(format!(
+            "learn-resume-test-{}-{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let challenge_id = "relay.09";
+        let (event_sender, _events) = mpsc::unbounded_channel();
+        let first_daemon = Daemon::load_builtin().expect("first daemon");
+        *first_daemon.progress.lock().expect("progress lock") =
+            Some(ProgressStore::open(&path).expect("first progress store"));
+        let open = learn_protocol::OpenSessionRequest {
+            challenge_id: challenge_id.to_owned(),
+            columns: 80,
+            rows: 24,
+        };
+        let first_session = first_daemon
+            .open_session(&open, &event_sender)
+            .expect("open lesson");
+        first_daemon
+            .write_terminal_input(
+                &learn_protocol::TerminalInput {
+                    session_id: first_session.session_id,
+                    data: b"rm ~/stale.txt\r".to_vec(),
+                },
+                &event_sender,
+            )
+            .expect("save partial lesson");
+        drop(first_daemon);
+
+        let resumed_daemon = Daemon::load_builtin().expect("restarted daemon");
+        *resumed_daemon.progress.lock().expect("progress lock") =
+            Some(ProgressStore::open(&path).expect("reopened progress store"));
+        assert_eq!(
+            resumed_daemon
+                .resume_state()
+                .expect("resume state")
+                .active_challenge_id
+                .as_deref(),
+            Some(challenge_id)
+        );
+        let resumed_session = resumed_daemon
+            .open_session(&open, &event_sender)
+            .expect("reopen lesson");
+        {
+            let sessions = resumed_daemon.sessions.lock().expect("session table");
+            let session = sessions
+                .get(&resumed_session.session_id)
+                .expect("managed lesson")
+                .session
+                .lock()
+                .expect("session lock");
+            let challenge = resumed_daemon.challenge(challenge_id).expect("challenge");
+            assert!(
+                !session
+                    .verify(&challenge.spec.verifier)
+                    .expect("verify partial work")
+            );
+        }
+        resumed_daemon
+            .write_terminal_input(
+                &learn_protocol::TerminalInput {
+                    session_id: resumed_session.session_id,
+                    data: b"touch ~/inbox/ready.txt\r".to_vec(),
+                },
+                &event_sender,
+            )
+            .expect("finish resumed lesson");
+        assert!(
+            resumed_daemon
+                .progress()
+                .expect("progress")
+                .iter()
+                .any(|item| item.challenge_id.as_str() == challenge_id
+                    && item.status == CompletionStatus::Completed)
+        );
+        drop(resumed_daemon);
+        drop(event_sender);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn old_progress_files_default_to_an_empty_resume_state() {
+        let state: ProgressState =
+            serde_json::from_str(r#"{"challenges":[]}"#).expect("legacy progress JSON");
+        assert!(state.resume.active_challenge_id.is_none());
+        assert!(state.resume.command_history.is_empty());
     }
 
     #[cfg(unix)]

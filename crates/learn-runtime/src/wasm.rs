@@ -17,9 +17,13 @@ use learn_core::{
     ToolRestrictionStrength, VerifierExpr, VerifierPredicate,
 };
 use learn_docs::command_manual;
+use serde::{Deserialize, Serialize};
 
 /// The embedded guest module's stable ABI version.
 pub const WASM_GUEST_ABI_VERSION: i32 = 1;
+
+const MAX_SESSION_SNAPSHOT_BYTES: usize = 1_048_576;
+const MAX_COMMAND_HISTORY: usize = 500;
 
 // A valid WebAssembly module exporting abi_version() -> i32. Keeping this
 // bundle in the binary makes the default runtime independent of a rootfs,
@@ -51,6 +55,7 @@ pub fn wasm_bundle_version() -> Result<i32, RuntimeError> {
 pub struct WasmSession {
     /// Session ID.
     pub id: String,
+    challenge_id: String,
     state: Arc<Mutex<SessionState>>,
     output: Arc<OutputBuffer>,
     reader: Option<Box<dyn Read + Send>>,
@@ -96,6 +101,72 @@ impl WasmSession {
         Ok(())
     }
 
+    /// Serialize this lesson's virtual files, working directory and shell history.
+    pub fn snapshot(&self) -> Result<Vec<u8>, RuntimeError> {
+        let state = self.state.lock().map_err(|_| RuntimeError::Poisoned)?;
+        serde_json::to_vec(&WasmSessionSnapshot {
+            version: 1,
+            challenge_id: self.challenge_id.clone(),
+            shell: state.shell.clone(),
+            input: state.input.clone(),
+            history: state.history[state.history.len().saturating_sub(MAX_COMMAND_HISTORY)..]
+                .to_vec(),
+            cursor: state.cursor,
+        })
+        .map_err(|error| RuntimeError::Wasm(format!("could not save lesson state: {error}")))
+    }
+
+    /// Restore saved lesson state when its challenge matches this session.
+    pub fn restore_snapshot(
+        &self,
+        challenge_id: &str,
+        snapshot: &[u8],
+    ) -> Result<(), RuntimeError> {
+        if snapshot.len() > MAX_SESSION_SNAPSHOT_BYTES {
+            return Err(RuntimeError::Wasm(
+                "saved lesson state is larger than the supported limit".to_owned(),
+            ));
+        }
+        let snapshot: WasmSessionSnapshot = serde_json::from_slice(snapshot).map_err(|error| {
+            RuntimeError::Wasm(format!("saved lesson state is invalid: {error}"))
+        })?;
+        if snapshot.version != 1
+            || snapshot.challenge_id != challenge_id
+            || self.challenge_id != challenge_id
+        {
+            return Err(RuntimeError::Wasm(
+                "saved lesson state belongs to a different challenge or version".to_owned(),
+            ));
+        }
+        validate_virtual_environment(&snapshot.shell.environment)?;
+        let cwd_is_directory = matches!(
+            snapshot.shell.fs.get(&snapshot.shell.cwd),
+            Some(Node::Directory)
+        );
+        if !cwd_is_directory
+            || !snapshot.shell.cwd.starts_with("/home/learner")
+            || snapshot.history.len() > MAX_COMMAND_HISTORY
+            || snapshot.input.len() > 65_536
+        {
+            return Err(RuntimeError::Wasm(
+                "saved lesson state failed validation".to_owned(),
+            ));
+        }
+        let cwd = snapshot.shell.cwd.clone();
+        let mut state = self.state.lock().map_err(|_| RuntimeError::Poisoned)?;
+        state.shell = snapshot.shell;
+        state.input = snapshot.input;
+        state.history = snapshot.history;
+        state.history_cursor = None;
+        state.cursor = snapshot.cursor.min(state.input.len());
+        state.escape.clear();
+        state.closed = false;
+        drop(state);
+        self.output
+            .push(format!("\r\n[lesson resumed]\r\n{}", prompt(&cwd)).as_bytes());
+        Ok(())
+    }
+
     /// The simulated shell remains alive until its session is closed.
     pub fn try_wait(&mut self) -> Result<Option<i32>, RuntimeError> {
         let state = self.state.lock().map_err(|_| RuntimeError::Poisoned)?;
@@ -118,7 +189,8 @@ impl WasmSession {
     /// Restore commands from the preceding lesson.
     pub fn set_command_history(&self, history: Vec<Vec<u8>>) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().map_err(|_| RuntimeError::Poisoned)?;
-        state.history = history;
+        let first_retained = history.len().saturating_sub(MAX_COMMAND_HISTORY);
+        state.history = history.into_iter().skip(first_retained).collect();
         state.history_cursor = None;
         Ok(())
     }
@@ -190,6 +262,7 @@ fn start_wasm_session_with_intro(
     }));
     let session = WasmSession {
         id: format!("wasm-{challenge_id}-{}", crate::unique_suffix()),
+        challenge_id: challenge_id.to_owned(),
         state,
         output: Arc::clone(&output),
         reader: Some(Box::new(OutputReader::new(output))),
@@ -224,6 +297,16 @@ struct SessionState {
     closed: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct WasmSessionSnapshot {
+    version: u8,
+    challenge_id: String,
+    shell: VirtualShell,
+    input: Vec<u8>,
+    history: Vec<Vec<u8>>,
+    cursor: usize,
+}
+
 impl SessionState {
     fn receive_byte(&mut self, byte: u8, output: &OutputBuffer) {
         if self.closed {
@@ -248,13 +331,16 @@ impl SessionState {
                     {
                         self.history.push(self.input.clone());
                     }
+                    if self.history.len() > MAX_COMMAND_HISTORY {
+                        self.history.remove(0);
+                    }
                     self.history_cursor = None;
                     self.input.clear();
                     self.cursor = 0;
                     output.push(b"\r\n");
                     let result = self.shell.execute_line(&command);
                     if !result.output.is_empty() {
-                        output.push(&result.output);
+                        output.push(&terminalize_output(&result.output));
                         if !result.output.ends_with(b"\n") && !result.output.starts_with(b"\x1b[2J")
                         {
                             output.push(b"\r\n");
@@ -465,6 +551,19 @@ const SHELL_BANNER: &str = "\r\n  ╭──────────────�
 
 const COMPACT_SHELL_BANNER: &str = "\r\n  ╭────────────────────────────────────────────╮\r\n  │       L E A R N   L I N U X                │\r\n  │     shell dojo • type help • level up      │\r\n  ╰────────────────────────────────────────────╯\r\n\r\n";
 
+fn terminalize_output(bytes: &[u8]) -> Vec<u8> {
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut previous = None;
+    for &byte in bytes {
+        if byte == b'\n' && previous != Some(b'\r') {
+            output.push(b'\r');
+        }
+        output.push(byte);
+        previous = Some(byte);
+    }
+    output
+}
+
 fn shell_banner(columns: u16) -> &'static str {
     if columns < 72 {
         COMPACT_SHELL_BANNER
@@ -543,13 +642,13 @@ impl Read for OutputReader {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 enum Node {
     Directory,
     File { contents: Vec<u8>, mode: u32 },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct VirtualShell {
     fs: BTreeMap<String, Node>,
     cwd: String,
@@ -1761,24 +1860,32 @@ fn verify_virtual_expression(
             VerifierPredicate::PathExists(path) => Ok(shell.fs.contains_key(path.as_str())),
             VerifierPredicate::PathMissing(path) => Ok(!shell.fs.contains_key(path.as_str())),
             VerifierPredicate::FileContains { path, needle } => {
-                let contents = shell
-                    .read_file_path(path.as_str())
-                    .map_err(RuntimeError::Shell)?;
+                let Ok(contents) = shell.read_file_path(path.as_str()) else {
+                    return Ok(false);
+                };
                 Ok(String::from_utf8_lossy(&contents).contains(needle))
             }
             VerifierPredicate::FileRead { path, expected } => {
                 if !shell.read_files.contains(path.as_str()) {
                     return Ok(false);
                 }
-                let contents = shell
-                    .read_file_path(path.as_str())
-                    .map_err(RuntimeError::Shell)?;
+                let Ok(contents) = shell.read_file_path(path.as_str()) else {
+                    return Ok(false);
+                };
                 Ok(String::from_utf8_lossy(&contents).contains(expected))
             }
-            VerifierPredicate::FileEquals { path, expected } => Ok(shell
-                .read_file_path(path.as_str())
-                .map_err(RuntimeError::Shell)?
-                == *expected),
+            VerifierPredicate::FileEquals { path, expected } => {
+                let Ok(contents) = shell.read_file_path(path.as_str()) else {
+                    return Ok(false);
+                };
+                Ok(contents == *expected)
+            }
+            VerifierPredicate::FileTextEquals { path, expected } => {
+                let Ok(contents) = shell.read_file_path(path.as_str()) else {
+                    return Ok(false);
+                };
+                Ok(learn_core::text_contents_equal(&contents, expected))
+            }
             VerifierPredicate::WorkingDirectory(expected) => Ok(shell.cwd == expected.as_str()),
         },
     }
@@ -1834,6 +1941,42 @@ mod tests {
     }
 
     #[test]
+    fn one_line_text_verification_accepts_echo_and_printf() {
+        let verifier = VerifierExpr::Predicate(VerifierPredicate::FileTextEquals {
+            path: SandboxPath::parse("~/status.txt").expect("path"),
+            expected: b"ready".to_vec(),
+        });
+        let echo_session = session(&[]);
+        command(&echo_session, "echo \"ready\" > status.txt");
+        assert!(echo_session.verify(&verifier).expect("verification"));
+
+        let printf_session = session(&[]);
+        command(&printf_session, "printf ready > ~/status.txt");
+        assert!(printf_session.verify(&verifier).expect("verification"));
+    }
+
+    #[test]
+    fn command_help_newlines_always_return_to_column_zero() {
+        let mut session = session(&[]);
+        let mut reader = session.take_reader().expect("reader is available");
+        session
+            .write(b"printf --help\r\x04")
+            .expect("help command is accepted");
+        let mut output = String::new();
+        reader
+            .read_to_string(&mut output)
+            .expect("session output is readable");
+        let newline_count = output.bytes().filter(|byte| *byte == b'\n').count();
+        let carriage_return_newline_count = output
+            .as_bytes()
+            .windows(2)
+            .filter(|pair| *pair == b"\r\n")
+            .count();
+        assert_eq!(newline_count, carriage_return_newline_count);
+        assert!(output.contains("USAGE: printf TEXT"));
+    }
+
+    #[test]
     fn file_read_verification_requires_a_real_read() {
         let path = SandboxPath::parse("~/welcome.txt").expect("path");
         let setup = [SetupAction::WriteFile {
@@ -1886,7 +2029,7 @@ mod tests {
         reader
             .read_to_string(&mut output)
             .expect("session output is readable");
-        assert!(output.contains("hi\n"));
+        assert!(output.contains("hi\r\n") || output.contains("hi\n"));
         assert!(output.contains("learner@learn"));
     }
 
@@ -2035,6 +2178,30 @@ mod tests {
         next.write(b"\x1b[A").expect("up arrow accepted");
         let state = next.state.lock().expect("session state");
         assert_eq!(state.input, b"pwd");
+    }
+
+    #[test]
+    fn lesson_snapshot_restores_files_working_directory_and_history() {
+        let previous = session(&[]);
+        command(&previous, "mkdir ~/project");
+        command(&previous, "cd ~/project");
+        let snapshot = previous.snapshot().expect("session serializes");
+
+        let restored = session(&[]);
+        restored
+            .restore_snapshot("test", &snapshot)
+            .expect("matching lesson state restores");
+        assert_eq!(restored.current_directory(), "/home/learner/project");
+        assert!(
+            restored
+                .verify(&VerifierExpr::Predicate(VerifierPredicate::PathExists(
+                    SandboxPath::parse("~/project").expect("path"),
+                )))
+                .expect("filesystem verifies")
+        );
+        restored.write(b"\x1b[A").expect("up arrow accepted");
+        let state = restored.state.lock().expect("session state");
+        assert_eq!(state.input, b"cd ~/project");
     }
 
     #[test]

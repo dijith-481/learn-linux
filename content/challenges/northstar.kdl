@@ -190,7 +190,7 @@ challenge "relay.05" version=1 {
     }
     verify {
         all {
-            file-equals "~/status.txt" "ready"
+            file-text-equals "~/status.txt" "ready"
         }
     }
     hints {

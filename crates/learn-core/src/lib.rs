@@ -277,6 +277,13 @@ pub enum VerifierPredicate {
         /// Exact expected contents.
         expected: Vec<u8>,
     },
+    /// A text file equals the expected text, allowing one optional final line ending.
+    FileTextEquals {
+        /// File path.
+        path: SandboxPath,
+        /// Expected text, with or without a final line ending.
+        expected: Vec<u8>,
+    },
     /// The shell is currently in a directory.
     WorkingDirectory(SandboxPath),
 }
@@ -337,6 +344,10 @@ impl VerifierExpr {
                     .files
                     .get(path)
                     .is_some_and(|contents| contents == expected),
+                VerifierPredicate::FileTextEquals { path, expected } => state
+                    .files
+                    .get(path)
+                    .is_some_and(|contents| text_contents_equal(contents, expected)),
                 VerifierPredicate::WorkingDirectory(path) => {
                     state.working_directory.as_ref() == Some(path)
                 }
@@ -345,6 +356,20 @@ impl VerifierExpr {
     }
 }
 
+/// Compare text while treating one final LF or CRLF as an optional line ending.
+///
+/// This lets shell lessons accept both echo and printf for a one-line value,
+/// even though echo adds a final newline by default.
+pub fn text_contents_equal(actual: &[u8], expected: &[u8]) -> bool {
+    fn without_final_line_ending(value: &[u8]) -> &[u8] {
+        value
+            .strip_suffix(b"\r\n")
+            .or_else(|| value.strip_suffix(b"\n"))
+            .unwrap_or(value)
+    }
+
+    without_final_line_ending(actual) == without_final_line_ending(expected)
+}
 /// A skill in the directed learning graph.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Skill {
@@ -554,6 +579,15 @@ mod tests {
             working_directory: None,
         };
         assert!(expression.evaluate(&state));
+    }
+
+    #[test]
+    fn text_equality_accepts_one_optional_final_line_ending() {
+        assert!(text_contents_equal(b"ready", b"ready"));
+        assert!(text_contents_equal(b"ready\n", b"ready"));
+        assert!(text_contents_equal(b"ready\r\n", b"ready\n"));
+        assert!(!text_contents_equal(b"ready\n\n", b"ready"));
+        assert!(!text_contents_equal(b"not-ready\n", b"ready"));
     }
 
     #[test]

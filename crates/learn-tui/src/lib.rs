@@ -21,6 +21,7 @@ use crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use frizbee::{Config, Matcher};
+use learn_core::{ChallengeProgress, CompletionStatus};
 use learn_daemon::{ClientError, Daemon, DaemonClient};
 use learn_protocol::{Envelope, envelope, event as protocol_event};
 use learn_runtime::{RuntimeError, start_wasm_session};
@@ -707,8 +708,21 @@ async fn app_loop(
     daemon: &Daemon,
     socket: Option<&Path>,
 ) -> Result<(), TuiError> {
-    let mut selected_index = 0_usize;
-    let mut selected_challenge = daemon.content.challenges.first().cloned();
+    let resume = daemon.resume_state()?;
+    let saved_progress = daemon.progress()?;
+    let resume_available = resume.active_challenge_id.is_some();
+    let challenge_ids = daemon
+        .content
+        .challenges
+        .iter()
+        .map(|challenge| challenge.spec.id.to_string())
+        .collect::<Vec<_>>();
+    let mut selected_index = resume_challenge_index(
+        &challenge_ids,
+        &saved_progress,
+        resume.active_challenge_id.as_deref(),
+    );
+    let mut selected_challenge = daemon.content.challenges.get(selected_index).cloned();
     let terminal_size = terminal.size().map_err(TuiError::Io)?;
     let mut terminal_columns = terminal_size.width;
     let mut terminal_rows = terminal_size.height;
@@ -749,6 +763,25 @@ async fn app_loop(
     } else {
         None
     };
+    if let (Some(session), Some(challenge)) = (session.as_ref(), selected_challenge.as_ref()) {
+        if resume.active_challenge_id.as_deref() == Some(challenge.spec.id.as_str())
+            && let Some(snapshot) = resume.shell_snapshot.as_deref()
+        {
+            session.restore_snapshot(challenge.spec.id.as_str(), snapshot)?;
+        }
+        session.set_command_history(
+            resume
+                .command_history
+                .iter()
+                .map(|command| command.as_bytes().to_vec())
+                .collect(),
+        )?;
+        daemon.save_resume_state(
+            &challenge.spec.id,
+            &session.command_history(),
+            Some(session.snapshot()?),
+        )?;
+    }
     let (output_sender, output_receiver) = mpsc::channel::<Vec<u8>>();
     if let Some(session) = session.as_mut() {
         spawn_output_reader(session, &output_sender)?;
@@ -898,6 +931,7 @@ async fn app_loop(
             selected_index,
             progress_started,
             session.is_some() || rpc_session_id.is_some(),
+            resume_available,
             mode,
             start_transition,
             hint_level,
@@ -1241,6 +1275,10 @@ async fn app_loop(
                                         rpc_session_id = Some(opened.session_id);
                                     }
                                 } else if let Some(challenge) = selected_challenge.as_ref() {
+                                    let history = session
+                                        .as_ref()
+                                        .map(learn_runtime::WasmSession::command_history)
+                                        .unwrap_or_default();
                                     session = Some(start_wasm_session(
                                         challenge.spec.id.as_str(),
                                         &challenge.spec.setup,
@@ -1249,7 +1287,13 @@ async fn app_loop(
                                         pane_rows,
                                     )?);
                                     if let Some(session) = session.as_mut() {
+                                        session.set_command_history(history)?;
                                         spawn_output_reader(session, &output_sender)?;
+                                        daemon.save_resume_state(
+                                            &challenge.spec.id,
+                                            &session.command_history(),
+                                            Some(session.snapshot()?),
+                                        )?;
                                     }
                                     parser = vt100::Parser::new(pane_rows, pane_columns, 1_000);
                                 }
@@ -1321,6 +1365,17 @@ async fn app_loop(
                                         .as_ref()
                                         .ok_or(RuntimeError::ReaderTaken)?
                                         .write(&bytes)?;
+                                    if submitted_command.is_some()
+                                        && let (Some(active), Some(challenge)) =
+                                            (session.as_ref(), selected_challenge.as_ref())
+                                    {
+                                        let snapshot = active.snapshot()?;
+                                        daemon.save_resume_state(
+                                            &challenge.spec.id,
+                                            &active.command_history(),
+                                            Some(snapshot),
+                                        )?;
+                                    }
                                 }
                                 let verified = client.is_none()
                                     && !completed
@@ -1476,6 +1531,13 @@ async fn advance_to_next_challenge(
             spawn_output_reader(session, output_sender)?;
         }
     }
+    if let Some(session) = session.as_ref() {
+        daemon.save_resume_state(
+            &challenge.spec.id,
+            &session.command_history(),
+            Some(session.snapshot()?),
+        )?;
+    }
     *parser = vt100::Parser::new(pane_rows, pane_columns, 1_000);
     Ok(true)
 }
@@ -1539,6 +1601,40 @@ async fn refresh_docs(
             .collect()
     };
     Ok(())
+}
+
+fn resume_challenge_index(
+    challenge_ids: &[String],
+    progress: &[ChallengeProgress],
+    active_id: Option<&str>,
+) -> usize {
+    if challenge_ids.is_empty() {
+        return 0;
+    }
+    let completed = |id: &str| {
+        progress.iter().any(|item| {
+            item.challenge_id.as_str() == id && item.status == CompletionStatus::Completed
+        })
+    };
+    if let Some(active_index) =
+        active_id.and_then(|id| challenge_ids.iter().position(|item| item == id))
+    {
+        if !completed(&challenge_ids[active_index]) {
+            return active_index;
+        }
+        if let Some(next_index) = challenge_ids
+            .iter()
+            .enumerate()
+            .skip(active_index + 1)
+            .find_map(|(index, id)| (!completed(id)).then_some(index))
+        {
+            return next_index;
+        }
+    }
+    challenge_ids
+        .iter()
+        .position(|id| !completed(id))
+        .unwrap_or(challenge_ids.len() - 1)
 }
 
 fn progress_rows_for(daemon: &Daemon) -> Vec<String> {
@@ -1663,6 +1759,7 @@ fn draw_ui(
     selected_index: usize,
     progress_started: Option<Duration>,
     session_active: bool,
+    resume_available: bool,
     mode: AppMode,
     start_transition: Option<Duration>,
     hint_level: usize,
@@ -1704,6 +1801,7 @@ fn draw_ui(
                     animation_time,
                     start_transition,
                     daemon.content.challenges.len(),
+                    resume_available,
                     theme,
                 );
                 return;
@@ -2126,6 +2224,7 @@ fn render_start_screen(
     time: Duration,
     _transition: Option<Duration>,
     challenge_count: usize,
+    resume_available: bool,
     theme: Theme,
 ) {
     frame.render_widget(
@@ -2141,7 +2240,14 @@ fn render_start_screen(
                 theme.fg,
             )),
             Line::from(""),
-            Line::from(Span::styled(" Enter  Start ", theme.selected())),
+            Line::from(Span::styled(
+                if resume_available {
+                    " Enter  Resume "
+                } else {
+                    " Enter  Start "
+                },
+                theme.selected(),
+            )),
             Line::from(""),
             Line::from(Span::styled("Ctrl-Space  menu    Esc  quit", theme.dim())),
         ];
@@ -2208,7 +2314,14 @@ fn render_start_screen(
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(" Enter ", theme.selected().add_modifier(Modifier::BOLD)),
-            Span::styled("  Open the shell  →", theme.accent()),
+            Span::styled(
+                if resume_available {
+                    "  Resume lesson  \u{2192}"
+                } else {
+                    "  Open the shell  \u{2192}"
+                },
+                theme.accent(),
+            ),
         ]))
         .block(
             Block::default()
@@ -3479,6 +3592,48 @@ pub enum TuiError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resume_selection_reopens_active_or_next_unfinished_lesson() {
+        let ids = vec!["one".to_owned(), "two".to_owned(), "three".to_owned()];
+        let completed = ChallengeProgress {
+            challenge_id: learn_core::ChallengeId::new("one").expect("valid ID"),
+            status: CompletionStatus::Completed,
+            attempts: 1,
+            hints_used: Vec::new(),
+        };
+        let in_progress = ChallengeProgress {
+            challenge_id: learn_core::ChallengeId::new("two").expect("valid ID"),
+            status: CompletionStatus::InProgress,
+            attempts: 1,
+            hints_used: Vec::new(),
+        };
+        assert_eq!(resume_challenge_index(&ids, &[], None), 0);
+        assert_eq!(
+            resume_challenge_index(&ids, &[completed.clone(), in_progress.clone()], Some("two")),
+            1
+        );
+        assert_eq!(
+            resume_challenge_index(&ids, std::slice::from_ref(&completed), Some("one")),
+            1
+        );
+        let mut completed_in_progress = in_progress;
+        completed_in_progress.status = CompletionStatus::Completed;
+        let all_complete = vec![
+            completed,
+            completed_in_progress,
+            ChallengeProgress {
+                challenge_id: learn_core::ChallengeId::new("three").expect("valid ID"),
+                status: CompletionStatus::Completed,
+                attempts: 1,
+                hints_used: Vec::new(),
+            },
+        ];
+        assert_eq!(
+            resume_challenge_index(&ids, &all_complete, Some("three")),
+            2
+        );
+    }
 
     #[test]
     fn game_of_life_uses_small_braille_subcells() {
