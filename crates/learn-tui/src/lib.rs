@@ -2249,7 +2249,10 @@ fn render_start_screen(
                 theme.selected(),
             )),
             Line::from(""),
-            Line::from(Span::styled("Ctrl-Space  menu    Esc  quit", theme.dim())),
+            Line::from(Span::styled(
+                "Ctrl-Space commands  •  Esc quit",
+                theme.dim(),
+            )),
         ];
         frame.render_widget(
             Paragraph::new(lines).alignment(Alignment::Center),
@@ -2568,7 +2571,7 @@ fn render_legacy_start_screen(
             if transition.is_some() {
                 format!("  syncing the sandbox  {progress}%")
             } else {
-                "  Enter begin  •  Ctrl-Space command center  •  Esc quit".to_owned()
+                "  Enter begin  •  Ctrl-Space opens command panel  •  Esc quit".to_owned()
             },
             Style::default().fg(Color::DarkGray),
         )),
@@ -2753,7 +2756,7 @@ fn render_compact_start_screen(
             .padding(Padding::uniform(1)),
     );
     frame.render_widget(body, rows[1]);
-    let footer = Paragraph::new("Ctrl-Space palette  •  Ctrl-T themes  •  Esc quit")
+    let footer = Paragraph::new("Ctrl-Space opens command panel  •  Ctrl-T themes  •  Esc quit")
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(footer, rows[2]);
@@ -3144,6 +3147,10 @@ fn docs_sidebar_lines(
         }
     }
     lines.push(Line::from(Span::styled(
+        "Ctrl-Space opens command panel",
+        theme.muted(),
+    )));
+    lines.push(Line::from(Span::styled(
         "Ctrl-H terminal  •  Ctrl-L docs  •  Esc back",
         theme.muted(),
     )));
@@ -3276,7 +3283,7 @@ fn render_palette_overlay(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(theme.accent())
-                .title(" ▣  COMMAND CENTER ")
+                .title(" ▣  COMMAND PANEL ")
                 .title_bottom(" Ctrl-Space close  •  ↑↓ navigate  •  Enter run ")
                 .padding(Padding::uniform(2)),
         )
