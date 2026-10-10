@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 224 252"
+     width="224" height="252" role="img" aria-label="Tux, the Learn Linux penguin">
+  <title>learn · Tux</title>
+  <defs>
+    <radialGradient id="tglow" cx="50%" cy="50%" r="52%">
+      <stop offset="0%" stop-color="#88c0d0" stop-opacity=".22"/>
+      <stop offset="100%" stop-color="#88c0d0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="112.0" cy="126.0" rx="112.0" ry="126.0" fill="url(#tglow)"/>
+  <ellipse cx="112.0" cy="229.59999999999997" rx="74" ry="8" fill="#000" opacity=".28">
+    <animate attributeName="rx" values="74;58;74;58;74" dur="2.6s"
+             repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".28;.12;.28;.12;.28" dur="2.6s"
+             repeatCount="indefinite"/>
+  </ellipse>
+  <g>
+    <animateTransform attributeName="transform" type="translate"
+      values="0 0; 0 -5; 0 0" dur="2.6s" repeatCount="indefinite"/>
+    <g fill="#2f3646"><rect x="84" y="14" width="56" height="14"/><rect x="70" y="28" width="84" height="14"/><rect x="56" y="42" width="112" height="14"/><rect x="42" y="56" width="140" height="14"/><rect x="28" y="70" width="168" height="14"/><rect x="28" y="84" width="168" height="14"/><rect x="28" y="98" width="168" height="14"/><rect x="28" y="112" width="168" height="14"/><rect x="28" y="126" width="168" height="14"/><rect x="56" y="140" width="98" height="14"/><rect x="70" y="154" width="70" height="14"/><rect x="84" y="168" width="56" height="14"/><rect x="84" y="182" width="56" height="14"/></g>
+    <g fill="#f2f5fa"><rect x="70" y="84" width="70" height="14"/><rect x="56" y="98" width="98" height="14"/><rect x="56" y="112" width="98" height="14"/><rect x="56" y="126" width="98" height="14"/><rect x="70" y="140" width="70" height="14"/></g>
+    <g fill="#f0c674"><rect x="105" y="70" width="14" height="14"/><rect x="70" y="196" width="28" height="14"/><rect x="140" y="196" width="28" height="14"/><rect x="70" y="210" width="42" height="14"/><rect x="126" y="210" width="42" height="14"/></g>
+    <g fill="#f2f5fa"><rect x="84" y="56" width="14" height="14"/><rect x="98" y="56" width="14" height="14"/><rect x="126" y="56" width="14" height="14"/><rect x="140" y="56" width="14" height="14"/><rect x="84" y="70" width="14" height="14"/><rect x="98" y="70" width="14" height="14"/><rect x="126" y="70" width="14" height="14"/><rect x="140" y="70" width="14" height="14"/></g>
+    <g fill="#0b0e14"><g><rect x="87.92" y="59.92" width="6.44" height="6.44"/><rect x="101.92" y="59.92" width="6.44" height="6.44"/><rect x="129.92" y="59.92" width="6.44" height="6.44"/><rect x="143.92" y="59.92" width="6.44" height="6.44"/><rect x="87.92" y="73.92" width="6.44" height="6.44"/><rect x="101.92" y="73.92" width="6.44" height="6.44"/><rect x="129.92" y="73.92" width="6.44" height="6.44"/><rect x="143.92" y="73.92" width="6.44" height="6.44"/><animate attributeName="opacity" values="1;1;0;1;1" keyTimes="0;0.93;0.94;0.95;1" dur="5.2s" repeatCount="indefinite"/></g></g>
+  </g>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 324 166"
+     width="324" height="166" role="img"
+     aria-label="The Learn Linux terminal mascot patrolling the lesson shell">
+  <title>learn · terminal mascot</title>
+  <defs>
+    <radialGradient id="mglow" cx="50%" cy="52%" r="55%">
+      <stop offset="0%" stop-color="#88c0d0" stop-opacity=".20"/>
+      <stop offset="100%" stop-color="#88c0d0" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <ellipse cx="162.0" cy="83.0" rx="162.0" ry="83.0" fill="url(#mglow)"/>
+  <ellipse cx="162.0" cy="142" rx="84" ry="7" fill="#000" opacity=".26">
+    <animate attributeName="rx" values="84;70;84;70;84" dur="0.9s"
+             repeatCount="indefinite"/>
+    <animate attributeName="opacity" values=".26;.13;.26;.13;.26" dur="0.9s"
+             repeatCount="indefinite"/>
+  </ellipse>
+  <g fill="#88c0d0" stroke="#88c0d0">
+    <animateTransform attributeName="transform" type="translate"
+      values="0 0; 0 -2; 0 0; 0 -2; 0 0" keyTimes="0;0.25;0.5;0.75;1"
+      dur="0.9s" repeatCount="indefinite"/>
+    <animateTransform attributeName="transform" type="skewX" additive="sum"
+      values="0;-1.4;0;1.4;0" keyTimes="0;0.25;0.5;0.75;1"
+      dur="0.9s" repeatCount="indefinite"/>
+    <rect x="82" y="34" width="20" height="10"/><rect x="102" y="24" width="80" height="20"/><rect x="182" y="34" width="20" height="10"/><rect x="42" y="54" width="20" height="10"/><rect x="62" y="44" width="160" height="20"/><rect x="222" y="54" width="20" height="10"/><rect x="22" y="64" width="60" height="20"/><circle cx="132" cy="74" r="4.7" fill="none" stroke-width="2.2"/><circle cx="132" cy="74" r="1.5" fill="#e2e8f2" stroke="none"/><animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.972;0.982;1" dur="4.3s" repeatCount="indefinite"/><rect x="124.4" y="72.8" width="15.2" height="2.4" fill="#e2e8f2" stroke="none" opacity="0"><animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.972;0.982;1" dur="4.3s" repeatCount="indefinite"/></rect><circle cx="192" cy="74" r="4.7" fill="none" stroke-width="2.2"/><circle cx="192" cy="74" r="1.5" fill="#e2e8f2" stroke="none"/><animate attributeName="opacity" values="1;1;0;1" keyTimes="0;0.972;0.982;1" dur="4.3s" repeatCount="indefinite"/><rect x="184.4" y="72.8" width="15.2" height="2.4" fill="#e2e8f2" stroke="none" opacity="0"><animate attributeName="opacity" values="0;0;1;0" keyTimes="0;0.972;0.982;1" dur="4.3s" repeatCount="indefinite"/></rect><rect x="222" y="64" width="60" height="20"/><rect x="22" y="84" width="60" height="20"/><polygon points="144.2,87.2 159.8,87.2 152,101.4" fill="#e2e8f2" stroke="none"/><rect x="222" y="84" width="60" height="20"/><rect x="42" y="104" width="20" height="10"/><rect x="62" y="104" width="160" height="20"/><rect x="222" y="104" width="20" height="10"/>
+    <g><animate attributeName="opacity" values="1;1;0;1;1" keyTimes="0;0.47;0.5;0.53;1" dur="4.4s" repeatCount="indefinite"/><rect x="282" y="114" width="10" height="10"/></g><g opacity="0"><animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.47;0.5;0.53;1" dur="4.4s" repeatCount="indefinite"/><rect x="22" y="104" width="10" height="10"/></g>
+    <g><g opacity="1"><animate attributeName="opacity" values="1;0;0;1" dur="0.9s" begin="0s" repeatCount="indefinite"/><rect x="82" y="124" width="40" height="10"/><rect x="162" y="124" width="40" height="10"/></g><g opacity="0"><animate attributeName="opacity" values="0;1;0;0" dur="0.9s" begin="0.3s" repeatCount="indefinite"/><rect x="82" y="124" width="40" height="10"/><rect x="182" y="124" width="20" height="10"/></g><g opacity="0"><animate attributeName="opacity" values="0;0;1;0" dur="0.9s" begin="0.6s" repeatCount="indefinite"/><rect x="102" y="124" width="20" height="10"/><rect x="182" y="124" width="40" height="10"/></g></g>
+  </g>
+</svg>

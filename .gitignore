@@ -2,3 +2,6 @@
 .direnv
 result
 *.swp
+
+# local README preview renderers
+/.preview-*.html
